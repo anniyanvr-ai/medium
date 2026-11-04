@@ -1,0 +1,81 @@
+# s3mover configuration — copy, edit, run:
+#   python -m s3mover plan -c config.yaml     # dry run: what would be moved (counts + bytes)
+#   python -m s3mover run  -c config.yaml     # copy/move + automatic verification
+#   python -m s3mover run  -c config.yaml     # same command again = RESUME after any stop/crash
+#
+# CLI overrides (no need to edit the file for the three scenarios):
+#   --mode full
+#   --mode since   --from 2025-06-01
+#   --mode between --from 2025-06-01 --to 2025-08-31
+#   --action move  --workers 16  --job-name <new-state>
+
+job:
+  name: rts-epcis-jun-aug-2025       # state file = <state_dir>/<name>.db ; one name per job definition
+  state_dir: ./state
+
+source:                              # always MinIO
+  endpoint: http://localhost:9000
+  access_key: minioadmin             # copy mode: a read-only user is enough (s3:ListBucket, s3:GetObject)
+  secret_key: minioadmin             # move mode: additionally s3:DeleteObject
+  type: minio
+  region: us-east-1
+  read_timeout: 120
+
+destination:                         # MinIO or SeaweedFS
+  endpoint: http://localhost:8333    # SeaweedFS S3 gateway   (MinIO -> MinIO: http://minio-b:9000)
+  access_key: seaweedadmin
+  secret_key: seaweedadmin
+  type: seaweedfs                    # minio | seaweedfs | s3
+  region: us-east-1
+
+buckets:
+  - source: rts-epcis
+    destination: rts-epcis           # optional, defaults to the source name; created if missing
+    # prefixes: ["epcis/", "reports/"]   # optional: only these prefixes (each is a parallel shard)
+    # dest_prefix: "archive/"            # optional: prepended to every destination key
+    auto_shard: true                 # split by top-level "folders" for parallel scanning
+  # - source: rts-aggregation
+
+filter:
+  mode: between                      # full | since | between
+  from: 2025-06-01                   # inclusive
+  to: 2025-08-31                     # date only = the WHOLE day is included (< 2025-09-01 00:00)
+                                     # exact timestamp (2025-08-31T18:00:00) = inclusive up to that instant
+  timezone: Asia/Kolkata             # how dates are interpreted: UTC | +05:30 | IANA name
+  date_source: last_modified         # last_modified (MinIO LastModified) | key_pattern (date inside the key)
+  # key_pattern: '(?P<y>\d{4})/(?P<m>\d{2})/(?P<d>\d{2})'   # used when date_source = key_pattern
+  # include_regex: '\.xml$'
+  # exclude_regex: '/tmp/'
+
+transfer:
+  action: copy                       # copy (source untouched) | move (delete source AFTER verified copy)
+  workers: 8                         # parallel object transfers
+  scan_workers: 2                    # parallel shard listings
+  multipart_threshold_mb: 16         # bigger objects are streamed in parts (never fully in memory)
+  part_size_mb: 8
+  max_inflight_mb: 256               # hard cap on object bytes held in RAM by the mover
+  skip_existing: true                # HEAD destination first; identical object -> skip (cheap resume)
+  preserve_metadata: true            # Content-Type, user metadata (+ s3mover-src-etag / -src-mtime)
+  max_retries: 5                     # per object, exponential back-off with jitter
+  folder_objects: auto               # keys ending in "/" that hold data (e.g. inbound-files-archive/, 1 KB):
+                                     # auto = SeaweedFS -> stored as "<key>.folder-object", MinIO -> same key
+  folder_object_suffix: .folder-object
+
+throttle:                            # protects MinIO and SeaweedFS from overload / OOM
+  source_rps: 100                    # max requests/s to MinIO (list + get + delete)
+  dest_rps: 200                      # max requests/s to the destination (head + put + parts)
+  adaptive: true                     # halve the rate on 503/SlowDown/timeouts, recover slowly
+  min_rps: 5
+  list_page_size: 1000
+  pause_file: ./state/PAUSE          # create this file to pause, delete it to continue
+  # memory_guard_url: http://minio-node1:9000/minio/v2/metrics/cluster
+  # memory_guard_token: <mc admin prometheus generate ALIAS>
+  # memory_guard_max_rss_mb: 24000  # pause while any MinIO node is above this RSS
+
+verify:
+  after_run: true                    # list destination and compare with every expected object
+
+dashboard:
+  enabled: true                      # served by the run process; or: python -m s3mover dashboard -c ...
+  host: 127.0.0.1                    # 0.0.0.0 to view from another machine
+  port: 8765

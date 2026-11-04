@@ -1,0 +1,40 @@
+# MinIO (localhost:9000)  ->  SeaweedFS (localhost:8333)
+# Run from the project folder, e.g.:
+#   py -3 -m s3mover run -c configs\minio-to-seaweedfs.yaml --mode full --job-name sw-full
+job:
+  name: minio-to-seaweedfs          # overridden per scenario with --job-name
+  state_dir: ../state
+
+source:
+  endpoint: http://localhost:9000   # MinIO S3 API (console is :9001)
+  access_key: minioadmin
+  secret_key: minioadmin
+  type: minio
+
+destination:
+  endpoint: http://localhost:8333   # SeaweedFS S3 gateway (filer UI is :8888)
+  access_key: seaweedadmin          # SeaweedFS without S3 auth accepts any value;
+  secret_key: seaweedadmin          # with auth, use a key from its s3.json / `s3.configure`
+  type: seaweedfs
+
+buckets:
+  - source: rts-epcis               # <-- your MinIO bucket (or pass --src-bucket)
+    destination: rts-epcis          # created in SeaweedFS if missing (or pass --dest-bucket)
+
+filter:
+  mode: full                        # overridden with --mode / --from / --to
+  timezone: Asia/Kolkata
+
+transfer:
+  action: copy                      # use --action move to delete from MinIO after a verified copy
+  workers: 8
+
+throttle:
+  source_rps: 100
+  dest_rps: 200
+  pause_file: ../state/PAUSE
+
+dashboard:
+  enabled: true
+  host: 127.0.0.1
+  port: 8765

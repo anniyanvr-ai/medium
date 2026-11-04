@@ -1,0 +1,41 @@
+# Local test stack: MinIO (source) + MinIO #2 (minio->minio target) + SeaweedFS (3 volume servers).
+#   docker compose -f integration/docker-compose.yml up -d
+#   python integration/run_scenarios.py --source real \
+#       --minio http://localhost:9000 --minio-dst http://localhost:9100 \
+#       --seaweed http://localhost:8333
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment: { MINIO_ROOT_USER: minioadmin, MINIO_ROOT_PASSWORD: minioadmin }
+    ports: ["9000:9000", "9001:9001"]
+    mem_limit: 2g
+
+  minio-b:
+    image: minio/minio:latest
+    command: server /data --console-address ":9101"
+    environment: { MINIO_ROOT_USER: minioadmin, MINIO_ROOT_PASSWORD: minioadmin }
+    ports: ["9100:9000", "9101:9101"]
+    mem_limit: 2g
+
+  sw-master:
+    image: chrislusf/seaweedfs:latest
+    command: master -ip=sw-master -defaultReplication=001 -volumeSizeLimitMB=1024
+    ports: ["9333:9333"]
+
+  sw-volume1: &vol
+    image: chrislusf/seaweedfs:latest
+    command: volume -mserver=sw-master:9333 -ip=sw-volume1 -port=8080 -max=100 -rack=rack1
+    depends_on: [sw-master]
+  sw-volume2:
+    <<: *vol
+    command: volume -mserver=sw-master:9333 -ip=sw-volume2 -port=8080 -max=100 -rack=rack1
+  sw-volume3:
+    <<: *vol
+    command: volume -mserver=sw-master:9333 -ip=sw-volume3 -port=8080 -max=100 -rack=rack1
+
+  sw-filer:
+    image: chrislusf/seaweedfs:latest
+    command: filer -master=sw-master:9333 -ip=sw-filer -s3 -s3.port=8333 -defaultReplicaPlacement=001
+    ports: ["8888:8888", "8333:8333"]
+    depends_on: [sw-volume1, sw-volume2, sw-volume3]

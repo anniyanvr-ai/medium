@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest>=8
+moto[server]>=5.0
+playwright>=1.40   # dashboard screenshots in the integration report
+psutil>=5.9        # peak-RSS measurement in the integration report

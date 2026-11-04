@@ -1,0 +1,48 @@
+# chpd bucket: files are organised as <folder>/<yyyy>/<m>/<d>/...  (e.g. 1KB/2025/11/2/)
+# The business date is in the PATH, not in MinIO's LastModified (that is the load date).
+#
+#   py -3 -m s3mover plan -c configs\chpd-by-folder-date.yaml --mode between --from 2025-11-01 --to 2025-11-30
+#   py -3 -m s3mover run  -c configs\chpd-by-folder-date.yaml --mode between --from 2025-11-01 --to 2025-11-30
+#
+# Only year/month/day folders inside the window are listed; all other date folders are skipped
+# without being read. Use a new --job-name for every different date range.
+job:
+  name: chpd-nov-2025
+  state_dir: ../state
+
+source:
+  endpoint: http://localhost:9000      # MinIO S3 API port (not the console URL)
+  access_key: minioadmin
+  secret_key: minioadmin
+  type: minio
+
+destination:
+  endpoint: http://localhost:8333      # SeaweedFS S3 gateway
+  access_key: seaweedadmin
+  secret_key: seaweedadmin
+  type: seaweedfs
+
+buckets:
+  - source: chpd
+    destination: test
+
+filter:
+  mode: between
+  from: 2025-11-01
+  to: 2025-11-30
+  timezone: Asia/Kolkata
+  date_source: key_pattern             # date taken from .../2025/11/2/... in the key
+  key_date_fallback: last_modified     # keys without a date (e.g. CHINA/x.xml) use LastModified
+  prune_date_folders: true             # never list year/month/day folders outside the window
+
+transfer:
+  action: copy
+  workers: 8
+
+throttle:
+  source_rps: 100
+  dest_rps: 200
+
+dashboard:
+  enabled: true
+  port: 8765

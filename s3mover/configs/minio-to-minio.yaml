@@ -1,0 +1,40 @@
+# MinIO (localhost:9000)  ->  MinIO (same server, different bucket)
+# Run from the project folder, e.g.:
+#   py -3 -m s3mover run -c configs\minio-to-minio.yaml --mode full --job-name mm-full
+job:
+  name: minio-to-minio              # overridden per scenario with --job-name
+  state_dir: ../state
+
+source:
+  endpoint: http://localhost:9000   # MinIO S3 API (console is :9001)
+  access_key: minioadmin
+  secret_key: minioadmin
+  type: minio
+
+destination:
+  endpoint: http://localhost:9000   # same MinIO; or a 2nd MinIO, e.g. http://minio-b:9000
+  access_key: minioadmin
+  secret_key: minioadmin
+  type: minio
+
+buckets:
+  - source: rts-epcis               # <-- your MinIO bucket (or pass --src-bucket)
+    destination: rts-epcis-copy     # MUST differ from the source bucket on the same server
+
+filter:
+  mode: full                        # overridden with --mode / --from / --to
+  timezone: Asia/Kolkata
+
+transfer:
+  action: copy                      # use --action move to delete from MinIO after a verified copy
+  workers: 8
+
+throttle:
+  source_rps: 100
+  dest_rps: 200
+  pause_file: ../state/PAUSE
+
+dashboard:
+  enabled: true
+  host: 127.0.0.1
+  port: 8765

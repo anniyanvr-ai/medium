@@ -1,0 +1,66 @@
+tests/integration/test_scenarios.py::test_scenario[minio-1-full] PASSED
+tests/integration/test_scenarios.py::test_scenario[minio-2-since-2025-06-01] PASSED
+tests/integration/test_scenarios.py::test_scenario[minio-3-between-jun1-aug31] PASSED
+tests/integration/test_scenarios.py::test_scenario[seaweedfs-1-full] PASSED
+tests/integration/test_scenarios.py::test_scenario[seaweedfs-2-since-2025-06-01] PASSED
+tests/integration/test_scenarios.py::test_scenario[seaweedfs-3-between-jun1-aug31] PASSED
+tests/integration/test_scenarios.py::test_graceful_stop_and_resume_no_duplicates[minio-full-None-None] PASSED
+tests/integration/test_scenarios.py::test_graceful_stop_and_resume_no_duplicates[minio-since-2025-06-01-None] PASSED
+tests/integration/test_scenarios.py::test_graceful_stop_and_resume_no_duplicates[minio-between-2025-06-01-2025-08-31] PASSED
+tests/integration/test_scenarios.py::test_graceful_stop_and_resume_no_duplicates[seaweedfs-full-None-None] PASSED
+tests/integration/test_scenarios.py::test_graceful_stop_and_resume_no_duplicates[seaweedfs-since-2025-06-01-None] PASSED
+tests/integration/test_scenarios.py::test_graceful_stop_and_resume_no_duplicates[seaweedfs-between-2025-06-01-2025-08-31] PASSED
+tests/integration/test_scenarios.py::test_hard_kill_minus_9_then_resume[minio-full-None-None] PASSED
+tests/integration/test_scenarios.py::test_hard_kill_minus_9_then_resume[minio-between-2025-06-01-2025-08-31] PASSED
+tests/integration/test_scenarios.py::test_hard_kill_minus_9_then_resume[seaweedfs-full-None-None] PASSED
+tests/integration/test_scenarios.py::test_hard_kill_minus_9_then_resume[seaweedfs-between-2025-06-01-2025-08-31] PASSED
+tests/integration/test_scenarios.py::test_move_removes_only_moved_objects_from_source[minio-since-2025-06-01-None] PASSED
+tests/integration/test_scenarios.py::test_move_removes_only_moved_objects_from_source[minio-between-2025-06-01-2025-08-31] PASSED
+tests/integration/test_scenarios.py::test_move_removes_only_moved_objects_from_source[seaweedfs-since-2025-06-01-None] PASSED
+tests/integration/test_scenarios.py::test_move_removes_only_moved_objects_from_source[seaweedfs-between-2025-06-01-2025-08-31] PASSED
+tests/integration/test_scenarios.py::test_rescan_picks_up_only_new_objects PASSED
+tests/integration/test_scenarios.py::test_existing_identical_objects_are_skipped PASSED
+tests/integration/test_scenarios.py::test_changed_filter_requires_new_job PASSED
+tests/integration/test_scenarios.py::test_key_pattern_date_source PASSED
+tests/integration/test_scenarios.py::test_plan_is_a_dry_run PASSED
+tests/integration/test_scenarios.py::test_cli_status_and_verify PASSED
+tests/unit/test_config.py::test_full_mode_has_no_window PASSED
+tests/unit/test_config.py::test_since_june_1_2025_is_inclusive_start PASSED
+tests/unit/test_config.py::test_between_june_and_aug_31_includes_whole_last_day PASSED
+tests/unit/test_config.py::test_between_with_exact_end_timestamp_is_inclusive PASSED
+tests/unit/test_config.py::test_yaml_native_dates_are_accepted PASSED
+tests/unit/test_config.py::test_timezone_ist_shifts_boundaries PASSED
+tests/unit/test_config.py::test_invalid_filters_rejected[flt0-requires filter.from] PASSED
+tests/unit/test_config.py::test_invalid_filters_rejected[flt1-must not set filter.to] PASSED
+tests/unit/test_config.py::test_invalid_filters_rejected[flt2-requires filter.from and filter.to] PASSED
+tests/unit/test_config.py::test_invalid_filters_rejected[flt3-before] PASSED
+tests/unit/test_config.py::test_invalid_filters_rejected[flt4-must not set] PASSED
+tests/unit/test_config.py::test_invalid_filters_rejected[flt5-filter.mode] PASSED
+tests/unit/test_config.py::test_invalid_filters_rejected[flt6-invalid date] PASSED
+tests/unit/test_config.py::test_invalid_filters_rejected[flt7-named groups] PASSED
+tests/unit/test_config.py::test_cli_overrides_switch_modes PASSED
+tests/unit/test_config.py::test_unknown_keys_rejected PASSED
+tests/unit/test_config.py::test_same_server_same_bucket_rejected PASSED
+tests/unit/test_config.py::test_transfer_limits_validated PASSED
+tests/unit/test_config.py::test_fingerprint_changes_with_window_not_with_workers PASSED
+tests/unit/test_config.py::test_parse_tz_variants PASSED
+tests/unit/test_filters_ratelimit.py::test_filter_last_modified_between PASSED
+tests/unit/test_filters_ratelimit.py::test_filter_key_pattern_uses_path_date_not_mtime PASSED
+tests/unit/test_filters_ratelimit.py::test_include_exclude_regex PASSED
+tests/unit/test_filters_ratelimit.py::test_folder_markers_only_in_full_mode PASSED
+tests/unit/test_filters_ratelimit.py::test_token_bucket_enforces_rate PASSED
+tests/unit/test_filters_ratelimit.py::test_aimd_halves_on_throttle_and_recovers PASSED
+tests/unit/test_filters_ratelimit.py::test_non_adaptive_limiter_keeps_rate PASSED
+tests/unit/test_state_engine.py::test_shard_page_and_resume_cursor PASSED
+tests/unit/test_state_engine.py::test_uncommitted_page_is_not_resumed_from PASSED
+tests/unit/test_state_engine.py::test_results_counts_and_reset_failed PASSED
+tests/unit/test_state_engine.py::test_snapshot_is_readonly PASSED
+tests/unit/test_state_engine.py::test_byte_budget_blocks_until_released PASSED
+tests/unit/test_state_engine.py::test_retry_on_slowdown_then_success_and_backoff PASSED
+tests/unit/test_state_engine.py::test_gives_up_after_max_retries PASSED
+tests/unit/test_state_engine.py::test_skip_existing_when_dest_identical PASSED
+tests/unit/test_state_engine.py::test_move_deletes_source_only_after_verified_copy PASSED
+tests/unit/test_state_engine.py::test_move_never_deletes_source_when_copy_fails PASSED
+tests/unit/test_state_engine.py::test_move_resume_after_crash_between_delete_and_commit PASSED
+tests/unit/test_state_engine.py::test_corrupted_source_read_is_detected PASSED
+======================== 65 passed in 125.59s (0:02:05) ========================
