@@ -1,0 +1,120 @@
+wrote inventory/lab-ent.yaml
+✔ rendered 36 services for 2 clusters into /home/claude/seaweedfs-deploy/build/lab-ent
+
+▶ deploy cluster primary (active)
+✔ pushed rendered configs to 16 nodes
+✔ phase master   3 svc  gate PASS in   2.0s  leaders={'127.10.1.11:9333.19333'}
+✔ phase volume   6 svc  gate PASS in   1.0s  6 volume servers
+✔ phase filer    3 svc  gate PASS in   3.0s  3 healthy
+✔ phase s3       3 svc  gate PASS in   1.0s  3 healthy
+✔ phase admin    1 svc  gate PASS in   0.0s  running
+✔ phase worker   2 svc  gate PASS in   0.0s  running
+
+▶ bootstrap primary
+  create bucket under /buckets
+    created bucket archive
+  applied tiering config revision 1: 1 profile(s), 1 binding(s)
+{
+  "revision": "1",
+  "profiles": [
+    {
+      "name": "archive-hot-cold",
+      "landing": {
+        "diskType": "ssd",
+        "replication": "010"
+      },
+      "tiers": [
+        {
+          "name": "cold-ec",
+          "when": {
+            "quietForSeconds": "7776000"
+          },
+          "ec": {
+            "diskType": "hdd",
+            "dataShards": 10,
+            "parityShards": 4
+          }
+        }
+      ]
+    }
+  ],
+  "bindings": [
+    {
+      "collectionPattern": "archive",
+      "profileName": "archive-hot-cold",
+      "volumeClass": "archive-data"
+    }
+  ],
+  "selectors": [
+    {
+      "volumeClass": "archive-data",
+      "match": [
+        "**"
+      ]
+    }
+  ]
+}
+
+▶ deploy cluster dr (standby)
+✔ pushed rendered configs to 16 nodes
+✔ phase master   3 svc  gate PASS in   2.0s  leaders={'127.20.1.11:9333.19333'}
+✔ phase volume   6 svc  gate PASS in   1.0s  6 volume servers
+✔ phase filer    3 svc  gate PASS in   3.0s  3 healthy
+✔ phase s3       3 svc  gate PASS in   1.0s  3 healthy
+✔ phase admin    1 svc  gate PASS in   0.0s  running
+✔ phase worker   2 svc  gate PASS in   0.0s  running
+
+▶ bootstrap dr
+  create bucket under /buckets
+    created bucket archive
+  applied tiering config revision 1: 1 profile(s), 1 binding(s)
+{
+  "revision": "1",
+  "profiles": [
+    {
+      "name": "archive-hot-cold",
+      "landing": {
+        "diskType": "ssd",
+        "replication": "010"
+      },
+      "tiers": [
+        {
+          "name": "cold-ec",
+          "when": {
+            "quietForSeconds": "7776000"
+          },
+          "ec": {
+            "diskType": "hdd",
+            "dataShards": 10,
+            "parityShards": 4
+          }
+        }
+      ]
+    }
+  ],
+  "bindings": [
+    {
+      "collectionPattern": "archive",
+      "profileName": "archive-hot-cold",
+      "volumeClass": "archive-data"
+    }
+  ],
+  "selectors": [
+    {
+      "volumeClass": "archive-data",
+      "match": [
+        "**"
+      ]
+    }
+  ]
+}
+enterprise deploy+bootstrap of both clusters: 18s
+
+[X01] Enterprise build and default dev/test licence active on every master
+  [32mPASS[0m (0.1s) {'version': 'version 8000GB 4.48-enterprise 5d7398cf linux amd64', 'masters': {'primary-master-01': '25TB licence', 'primary-master-02': '25TB licence', 'primary-master-03': '25TB licence', 'dr-master-01': '25TB licence', 'dr-master-02': '25TB licence', 'dr-master-03': '25TB licence'}}
+
+[X02] Rendered production tiering policy validates and applies (tiering.apply / get / status)
+  [32mPASS[0m (0.5s) {'apply': 'applied tiering config revision 2: 1 profile(s), 1 binding(s)', 'v1_schema_note': 'v1.0 JSON (\'pattern\'/\'class\') is rejected: unknown field "pattern"; correct protojson is {\'match\': [\'**\'], \'volumeClass\': ...}'}
+
+[X03] Worker-driven demotion SSD(010) -> EC 10+4 on HDD with a 60s test rung
+Terminated

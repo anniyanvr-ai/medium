@@ -1,0 +1,137 @@
+[
+  {
+    "level": "PASS",
+    "check": "port-plan",
+    "message": "no metrics/HTTP/gRPC(+10000) port collision inside any process"
+  },
+  {
+    "level": "PASS",
+    "check": "master-quorum",
+    "message": "[primary] 3 masters (odd, tolerates 1 loss)"
+  },
+  {
+    "level": "PASS",
+    "check": "replication",
+    "message": "[primary] ssd: 010 across 3 racks"
+  },
+  {
+    "level": "PASS",
+    "check": "replication",
+    "message": "[primary] hdd: 010 across 3 racks"
+  },
+  {
+    "level": "FAIL",
+    "check": "ec-node-loss",
+    "message": "[primary] EC 10+4 on 3 cold nodes puts up to 5 shards on one node > 4 parity: losing ONE cold node makes EC data unreadable. Need >= 4 cold nodes, or a narrower code (e.g. 6+3 / 4+2)"
+  },
+  {
+    "level": "FAIL",
+    "check": "ec-rack-loss",
+    "message": "[primary] EC 10+4 across 3 racks = 5 shards/rack > 4 parity: a rack failure makes EC data unreadable. Need >= 4 racks or a narrower code"
+  },
+  {
+    "level": "WARN",
+    "check": "ec-min-nodes",
+    "message": "[primary] weed ec.encode refuses < 4 nodes without -force"
+  },
+  {
+    "level": "PASS",
+    "check": "filer-ha",
+    "message": "[primary] 3 filer node(s) (min 2)"
+  },
+  {
+    "level": "PASS",
+    "check": "s3-ha",
+    "message": "[primary] 3 s3 node(s) (min 2)"
+  },
+  {
+    "level": "WARN",
+    "check": "filer-store",
+    "message": "[primary] leveldb2 per filer: each filer holds a full metadata copy synced via peers. Fine to ~100M entries; use a shared HA store (postgres2/TiKV/etc.) beyond that"
+  },
+  {
+    "level": "WARN",
+    "check": "ssd-sizing",
+    "message": "[primary] sla.daily_ingest_gb unset - cannot prove 90-day SSD capacity (11520GB raw SSD)"
+  },
+  {
+    "level": "WARN",
+    "check": "dm-tuning",
+    "message": "[primary] data_movement_tuning unset: an orphaned job blocks replication for up to 24 h (E-08); set execution_timeout_seconds/slice_max_runtime_seconds"
+  },
+  {
+    "level": "PASS",
+    "check": "master-quorum",
+    "message": "[dr] 3 masters (odd, tolerates 1 loss)"
+  },
+  {
+    "level": "PASS",
+    "check": "replication",
+    "message": "[dr] ssd: 010 across 3 racks"
+  },
+  {
+    "level": "PASS",
+    "check": "replication",
+    "message": "[dr] hdd: 010 across 3 racks"
+  },
+  {
+    "level": "FAIL",
+    "check": "ec-node-loss",
+    "message": "[dr] EC 10+4 on 3 cold nodes puts up to 5 shards on one node > 4 parity: losing ONE cold node makes EC data unreadable. Need >= 4 cold nodes, or a narrower code (e.g. 6+3 / 4+2)"
+  },
+  {
+    "level": "FAIL",
+    "check": "ec-rack-loss",
+    "message": "[dr] EC 10+4 across 3 racks = 5 shards/rack > 4 parity: a rack failure makes EC data unreadable. Need >= 4 racks or a narrower code"
+  },
+  {
+    "level": "WARN",
+    "check": "ec-min-nodes",
+    "message": "[dr] weed ec.encode refuses < 4 nodes without -force"
+  },
+  {
+    "level": "PASS",
+    "check": "filer-ha",
+    "message": "[dr] 3 filer node(s) (min 2)"
+  },
+  {
+    "level": "PASS",
+    "check": "s3-ha",
+    "message": "[dr] 3 s3 node(s) (min 2)"
+  },
+  {
+    "level": "WARN",
+    "check": "filer-store",
+    "message": "[dr] leveldb2 per filer: each filer holds a full metadata copy synced via peers. Fine to ~100M entries; use a shared HA store (postgres2/TiKV/etc.) beyond that"
+  },
+  {
+    "level": "WARN",
+    "check": "ssd-sizing",
+    "message": "[dr] sla.daily_ingest_gb unset - cannot prove 90-day SSD capacity (11520GB raw SSD)"
+  },
+  {
+    "level": "PASS",
+    "check": "dr-independent",
+    "message": "[dr] separate master quorum from primary"
+  },
+  {
+    "level": "WARN",
+    "check": "dr-seed",
+    "message": "[dr] replicated objects are NEW writes on DR: they land on DR SSD and only demote 90d after the SEED. Size DR SSD for the seed or seed with a temporary short quietForSeconds / HDD landing on DR"
+  },
+  {
+    "level": "WARN",
+    "check": "dm-tuning",
+    "message": "[dr] data_movement_tuning unset: an orphaned job blocks replication for up to 24 h (E-08); set execution_timeout_seconds/slice_max_runtime_seconds"
+  },
+  {
+    "level": "WARN",
+    "check": "sla",
+    "message": "sla.rpo_seconds not approved - replication-lag alerting uses a placeholder"
+  },
+  {
+    "level": "WARN",
+    "check": "sla",
+    "message": "sla.rto_minutes not approved - replication-lag alerting uses a placeholder"
+  }
+]

@@ -1,0 +1,39 @@
+{
+  "selectors": [
+    {
+      "match": [
+        "**"
+      ],
+      "volumeClass": "archive-data"
+    }
+  ],
+  "profiles": [
+    {
+      "name": "archive-hot-cold",
+      "landing": {
+        "diskType": "ssd",
+        "replication": "010"
+      },
+      "tiers": [
+        {
+          "name": "cold-ec",
+          "when": {
+            "quietForSeconds": 7776000
+          },
+          "ec": {
+            "diskType": "hdd",
+            "dataShards": 10,
+            "parityShards": 4
+          }
+        }
+      ]
+    }
+  ],
+  "bindings": [
+    {
+      "collectionPattern": "archive",
+      "volumeClass": "archive-data",
+      "profileName": "archive-hot-cold"
+    }
+  ]
+}

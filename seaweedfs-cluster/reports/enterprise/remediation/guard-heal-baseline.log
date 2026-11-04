@@ -1,0 +1,6 @@
+✘ [dm] primary->dr:archive canary NOT replicated within 60s (policy phase=caught_up, job=running on w-vm-96ea, orphaned jobs=0, live workers=2)
+  [dm] FIX: primary->dr:archive: rolling restart of workers
+  [dm] FIX: primary->dr:archive: restart admin, then workers
+✔ [dm] primary->dr:archive: replication resumed 313s after the first fix
+  [dm] FIX: primary->dr:archive: reconcile window since 2026-10-07 14:24:53
+✔ [dm] primary->dr:archive: reconcile checked 7549 objects, copied 16, failures 0

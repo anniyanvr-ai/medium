@@ -1,0 +1,41 @@
+I0929 17:23:13.697745 filer.go:369 Initialized credential manager: filer_etc
+I0929 17:23:13.698269 filer_server.go:220 default to create filer store dir in /tmp/pc/filerldb2
+I0929 17:23:13.698361 filer_server.go:228 max_file_name_length 255
+I0929 17:23:13.713872 leveldb2_store.go:43 filer store leveldb2 dir: /tmp/pc/filerldb2
+I0929 17:23:13.713902 file_util.go:29 Folder /tmp/pc/filerldb2 Permission: -rwxr-xr-x
+I0929 17:23:13.714718 masterclient.go:262 .filer masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:13.734767 filer.go:213 create filer.store.id to 103811811
+I0929 17:23:13.734778 configuration.go:29 configured filer store to leveldb2
+I0929 17:23:13.734917 filer_server_tus_session.go:637 TUS session cleanup started with interval 1h0m0s
+I0929 17:23:14.715281 masterclient.go:586 .filer masterClient reconnection attempt #1
+I0929 17:23:14.716620 masterclient.go:262 .filer masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:15.717296 masterclient.go:586 .filer masterClient reconnection attempt #2
+I0929 17:23:15.718340 masterclient.go:262 .filer masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:16.719167 masterclient.go:586 .filer masterClient reconnection attempt #3
+I0929 17:23:16.720075 masterclient.go:262 .filer masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:17.721090 masterclient.go:586 .filer masterClient reconnection attempt #4
+I0929 17:23:17.721904 masterclient.go:262 .filer masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:18.723040 masterclient.go:586 .filer masterClient reconnection attempt #5
+I0929 17:23:18.724155 masterclient.go:262 .filer masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:19.724905 masterclient.go:586 .filer masterClient reconnection attempt #6
+I0929 17:23:19.725981 masterclient.go:262 .filer masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:20.726454 masterclient.go:586 .filer masterClient reconnection attempt #7
+I0929 17:23:20.727430 masterclient.go:262 .filer masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:21.728456 masterclient.go:586 .filer masterClient reconnection attempt #8
+I0929 17:23:21.730032 masterclient.go:381 updateVidMap ignore short heartbeat: volume_location:{leader:"127.98.0.1:9333.19333"}
+I0929 17:23:21.806039 master_client.go:24 the cluster has 1 filer
+I0929 17:23:21.806074 filer_server.go:299 127.98.0.1:8888 bootstrap from peers [node_type:"filer" address:"127.98.0.1:8888.18888" is_add:true created_at_ns:1790702601729462901]
+I0929 17:23:21.806167 filer.go:152 127.98.0.1:8888 aggregate from peers [127.98.0.1:8888]
+I0929 17:23:21.806456 filer.go:450 Start Seaweed Filer 8000GB 4.47 pypi at 127.98.0.1:8888
+I0929 17:23:21.806505 meta_aggregator.go:335 loopSubscribeToOneFiler read 127.98.0.1:8888 start from 2026-09-29 17:22:21.806065478 +0000 UTC 1790702541806065478
+I0929 17:23:21.806856 net_timeout.go:171 skip starting on 127.98.0.1:8888: listen tcp 127.0.0.1:8888: bind: address already in use
+I0929 17:23:21.806907 net_timeout.go:171 skip starting on 127.98.0.1:18888: listen tcp 127.0.0.1:18888: bind: address already in use
+I0929 17:23:21.807013 filer.go:479 Registered IAM gRPC service on filer (unauthenticated; set jwt.filer_signing.key in security.toml to require admin Bearer token)
+I0929 17:23:21.807138 meta_aggregator.go:351 subscribing remote 127.98.0.1:8888 meta change: connecting to peer filer 127.98.0.1:8888: rpc error: code = Unavailable desc = connection error: desc = "transport: Error while dialing: dial tcp 127.98.0.1:18888: connect: connection refused"
+I0929 17:23:22.576914 masterclient.go:292 .filer masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unavailable desc = error reading from server: EOF
+I0929 17:23:22.577344 filer.go:498 Gracefully stopping gRPC server
+I0929 17:23:22.577442 filer.go:506 gRPC server stopped gracefully
+I0929 17:23:22.577445 filer.go:635 Gracefully stopping all HTTP servers
+I0929 17:23:22.577512 filer_server.go:355 Shutting down filer
+I0929 17:23:22.577559 filer_deletion.go:306 deletion processor shutting down
+I0929 17:23:22.577571 filer_deletion.go:515 retry processor shutting down, 0 items remaining in queue

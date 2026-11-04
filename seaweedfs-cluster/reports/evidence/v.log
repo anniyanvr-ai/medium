@@ -1,0 +1,19 @@
+I0929 17:23:02.661831 file_util.go:29 Folder /tmp/pc Permission: -rwxr-xr-x
+F0929 17:23:02.666766 volume.go:577 failed to listen on grpc port 18080: listen tcp 127.98.0.1:18080: bind: address already in use
+goroutine 1 [running]:
+github.com/seaweedfs/seaweedfs/weed/glog.stacks(0x0)
+	github.com/seaweedfs/seaweedfs/weed/glog/glog.go:832 +0x85
+github.com/seaweedfs/seaweedfs/weed/glog.(*loggingT).output(0x94d6d40, 0x3, 0x82e1475e310, {0x5aeef48?, 0x82e156ef3a8?}, 0x2?, 0x0)
+	github.com/seaweedfs/seaweedfs/weed/glog/glog.go:783 +0x43d
+github.com/seaweedfs/seaweedfs/weed/glog.(*loggingT).printf(0x94d6d40, 0x3, {0x45739ff, 0x24}, {0x82e156ef3a8, 0x2, 0x2})
+	github.com/seaweedfs/seaweedfs/weed/glog/glog.go:680 +0x12a
+github.com/seaweedfs/seaweedfs/weed/glog.Fatalf(...)
+	github.com/seaweedfs/seaweedfs/weed/glog/glog.go:1242
+github.com/seaweedfs/seaweedfs/weed/command.VolumeServerOptions.startGrpcService({0x82e14a33be0, 0x82e14a33c08, 0x82e14a33c10, {0x82e155e0c40, 0x1, 0x1}, {0x82e1505a568, 0x1, 0x2}, 0x82e155e00e0, ...}, ...)
+	github.com/seaweedfs/seaweedfs/weed/command/volume.go:577 +0xe7
+github.com/seaweedfs/seaweedfs/weed/command.VolumeServerOptions.startVolumeServer({0x82e14a33be0, 0x82e14a33c08, 0x82e14a33c10, {0x0, 0x0, 0x0}, {0x0, 0x0, 0x0}, 0x82e155e00e0, ...}, ...)
+	github.com/seaweedfs/seaweedfs/weed/command/volume.go:462 +0x181b
+github.com/seaweedfs/seaweedfs/weed/command.runVolume(0x949f5a0?, {0x82e140f20a0?, 0x6?, 0x6?})
+	github.com/seaweedfs/seaweedfs/weed/command/volume.go:286 +0x379
+main.main()
+	github.com/seaweedfs/seaweedfs/weed/weed.go:97 +0x469

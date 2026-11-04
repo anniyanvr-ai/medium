@@ -1,0 +1,101 @@
+[
+  {
+    "n": 1,
+    "file": "01-primary-data-movement_targets.png",
+    "step": "5. Data Movement setup",
+    "page": "/data-movement/targets",
+    "cluster": "primary",
+    "caption": "Target primary-to-dr: DR filer gRPC 127.20.4.11:18888 with mTLS files",
+    "time": "13:59:58"
+  },
+  {
+    "n": 2,
+    "file": "02-primary-data-movement.png",
+    "step": "5. Data Movement setup",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "Policy archive-primary-to-dr created: CONTINUOUS, initial snapshot ON, deletes ON",
+    "time": "14:00:05"
+  },
+  {
+    "n": 3,
+    "file": "03-primary-data-movement.png",
+    "step": "6. Initial snapshot",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "Policy CAUGHT_UP after the initial snapshot",
+    "time": "14:00:47"
+  },
+  {
+    "n": 4,
+    "file": "04-primary-plugin_lanes_movement.png",
+    "step": "6. Initial snapshot",
+    "page": "/plugin/lanes/movement",
+    "cluster": "primary",
+    "caption": "Movement lane: data_movement jobs executed by the workers",
+    "time": "14:00:51"
+  },
+  {
+    "n": 5,
+    "file": "05-primary-data-movement.png",
+    "step": "7. Replication under failure",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "dr/srcfail: fault active, policy status during the outage",
+    "time": "14:01:16"
+  },
+  {
+    "n": 6,
+    "file": "06-primary-data-movement.png",
+    "step": "7. Replication under failure",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "dr/dstfail: fault active, policy status during the outage",
+    "time": "14:01:49"
+  },
+  {
+    "n": 7,
+    "file": "07-primary-data-movement.png",
+    "step": "7. Replication under failure",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "dr/workerfail: fault active, policy status during the outage",
+    "time": "14:02:23"
+  },
+  {
+    "n": 8,
+    "file": "08-primary-data-movement.png",
+    "step": "8. Backup policy",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "BACKUP policy (deletes OFF) next to the CONTINUOUS mirror",
+    "time": "14:09:41"
+  },
+  {
+    "n": 9,
+    "file": "09-dr-dashboard.png",
+    "step": "9. DC failover",
+    "page": "/",
+    "cluster": "dr",
+    "caption": "DR Admin dashboard while Primary is down: DR serving LIST/GET/PUT",
+    "time": "14:10:14"
+  },
+  {
+    "n": 10,
+    "file": "10-dr-object-store_buckets.png",
+    "step": "9. DC failover",
+    "page": "/object-store/buckets",
+    "cluster": "dr",
+    "caption": "DR buckets: archive holds the replicated data plus DR-era writes",
+    "time": "14:10:18"
+  },
+  {
+    "n": 11,
+    "file": "11-primary-data-movement.png",
+    "step": "10. Failback",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "Primary Admin after failback: forward CONTINUOUS mirror re-enabled",
+    "time": "14:10:59"
+  }
+]

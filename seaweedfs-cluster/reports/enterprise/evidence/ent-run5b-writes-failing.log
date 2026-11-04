@@ -1,0 +1,5 @@
+
+[X05] Remediation: Enterprise custom EC 6+3 survives a cold node loss on 3 racks
+  [31mFAIL[0m (677.7s) {'demoted': False, 'ec_volumes': 6, 'worst_shards_on_one_node': 3, 'unreadable_with_cold01_down': '0/200'}
+
+[X10] Initial snapshot completeness on a pre-loaded primary (written via all 3 gateways)

@@ -1,0 +1,17 @@
+✘ [dm] primary->dr:archive canary NOT replicated within 60s (policy phase=tailing, job=running on w-vm-96ea, orphaned jobs=0, live workers=2)
+  [dm] FIX: primary->dr:archive: expire the policy's job and trigger detection
+  [dm] FIX: primary->dr:archive: expired job data_movement-scheduled-1791397046229180453-1 on w-vm-96ea -> HTTP 200
+  [dm] FIX: primary->dr:archive: restart admin, then workers
+✔ [dm] primary->dr:archive: replication resumed 758s after the first fix
+  [dm] FIX: primary->dr:archive: reconcile window since 2026-10-07 17:45:22
+✔ [dm] primary->dr:archive: reconcile checked 10657 objects, copied 15, failures 0
+! [tier] primary: 2 replicated copy(ies) of fully erasure-coded volumes still present ([67]) - finding E-03
+  [tier] FIX: primary: volume.delete -node=127.10.10.12:8080 -volumeId=67; volume.delete -node=127.10.10.13:8080 -volumeId=67
+✔ [tier] primary: leftover copies removed (2/2)
+✘ [layout] primary: 2 master(s) list erasure-coded/missing volumes as writable [('archive63', 67)] - S3 PUTs can fail with 'volume N not found' (E-07)
+  [layout] FIX: primary: restart master primary-master-01
+  [layout] FIX: primary: restart master primary-master-02
+  [layout] FIX: primary: restart master primary-master-03
+✔ [layout] primary: stale writables after rolling master restart: 0
+✔ [capacity] primary: volume_cold 69/216 volume slots used (68% free, 3 rack(s) with a free slot)
+✔ [capacity] primary: volume_hot 79/360 volume slots used (78% free, 3 rack(s) with a free slot)

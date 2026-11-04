@@ -1,0 +1,4 @@
+{"test": "X15 follow-up", "action": "stop+start primary admin and both workers",
+ "canary_replicated_after_s": 386.7,
+ "writes_during_stall": 494, "still_missing_after_recovery": 288,
+ "note": "the resumed data_movement job did not replay 288 of the 494 writes made while replication was stalled; only s3-reconcile closes the gap"}

@@ -1,0 +1,3 @@
+{"test": "X16 manual check (14:47 local)", "backup_copy_on_dr_after_s": 2.0, "kept_after_primary_delete": true,
+ "context": "policy archive-backup, mode BACKUP, deletes OFF; checked after its data_movement job had been scheduled",
+ "suite_result": "in both suite passes the newly created / resumed backup policy was not scheduled within 300 s (job left 'running' on a previous worker id)"}

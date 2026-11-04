@@ -1,0 +1,52 @@
+{
+ "ts": 1791398980.01122,
+ "rc": 0,
+ "findings": [
+  {
+   "check": "dm",
+   "level": "OK",
+   "msg": "primary->dr:archive canary replicated in 0.51s"
+  },
+  {
+   "check": "tier",
+   "level": "OK",
+   "msg": "primary: no leftover replicas of erasure-coded volumes"
+  },
+  {
+   "check": "tier",
+   "level": "OK",
+   "msg": "dr: no leftover replicas of erasure-coded volumes"
+  },
+  {
+   "check": "layout",
+   "level": "OK",
+   "msg": "primary: master writable layouts consistent"
+  },
+  {
+   "check": "layout",
+   "level": "OK",
+   "msg": "dr: master writable layouts consistent"
+  },
+  {
+   "check": "capacity",
+   "level": "OK",
+   "msg": "primary: volume_cold 69/216 volume slots used (68% free, 3 rack(s) with a free slot)"
+  },
+  {
+   "check": "capacity",
+   "level": "OK",
+   "msg": "primary: volume_hot 127/360 volume slots used (65% free, 3 rack(s) with a free slot)"
+  },
+  {
+   "check": "capacity",
+   "level": "OK",
+   "msg": "dr: volume_cold 51/216 volume slots used (76% free, 3 rack(s) with a free slot)"
+  },
+  {
+   "check": "capacity",
+   "level": "OK",
+   "msg": "dr: volume_hot 101/360 volume slots used (72% free, 3 rack(s) with a free slot)"
+  }
+ ],
+ "actions": []
+}

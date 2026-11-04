@@ -1,0 +1,244 @@
+wrote inventory/lab.yaml
+PASS  port-plan       no metrics/HTTP/gRPC(+10000) port collision inside any process
+PASS  master-quorum   [primary] 3 masters (odd, tolerates 1 loss)
+PASS  replication     [primary] ssd: 010 across 3 racks
+PASS  replication     [primary] hdd: 010 across 3 racks
+FAIL  ec-node-loss    [primary] EC 10+4 on 3 cold nodes puts up to 5 shards on one node > 4 parity: losing ONE cold node makes EC data unreadable. Need >= 4 cold nodes, or a narrower code (e.g. 6+3 / 4+2)
+FAIL  ec-rack-loss    [primary] EC 10+4 across 3 racks = 5 shards/rack > 4 parity: a rack failure makes EC data unreadable. Need >= 4 racks or a narrower code
+WARN  ec-min-nodes    [primary] weed ec.encode refuses < 4 nodes without -force
+PASS  filer-ha        [primary] 3 filer node(s) (min 2)
+PASS  s3-ha           [primary] 3 s3 node(s) (min 2)
+WARN  filer-store     [primary] leveldb2 per filer: each filer holds a full metadata copy synced via peers. Fine to ~100M entries; use a shared HA store (postgres2/TiKV/etc.) beyond that
+WARN  ssd-sizing      [primary] sla.daily_ingest_gb unset - cannot prove 90-day SSD capacity (11520GB raw SSD)
+PASS  master-quorum   [dr] 3 masters (odd, tolerates 1 loss)
+PASS  replication     [dr] ssd: 010 across 3 racks
+PASS  replication     [dr] hdd: 010 across 3 racks
+FAIL  ec-node-loss    [dr] EC 10+4 on 3 cold nodes puts up to 5 shards on one node > 4 parity: losing ONE cold node makes EC data unreadable. Need >= 4 cold nodes, or a narrower code (e.g. 6+3 / 4+2)
+FAIL  ec-rack-loss    [dr] EC 10+4 across 3 racks = 5 shards/rack > 4 parity: a rack failure makes EC data unreadable. Need >= 4 racks or a narrower code
+WARN  ec-min-nodes    [dr] weed ec.encode refuses < 4 nodes without -force
+PASS  filer-ha        [dr] 3 filer node(s) (min 2)
+PASS  s3-ha           [dr] 3 s3 node(s) (min 2)
+WARN  filer-store     [dr] leveldb2 per filer: each filer holds a full metadata copy synced via peers. Fine to ~100M entries; use a shared HA store (postgres2/TiKV/etc.) beyond that
+WARN  ssd-sizing      [dr] sla.daily_ingest_gb unset - cannot prove 90-day SSD capacity (11520GB raw SSD)
+PASS  dr-independent  [dr] separate master quorum from primary
+WARN  dr-seed         [dr] replicated objects are NEW writes on DR: they land on DR SSD and only demote 90d after the SEED. Size DR SSD for the seed or seed with a temporary short quietForSeconds / HDD landing on DR
+WARN  sla             sla.rpo_seconds not approved - replication-lag alerting uses a placeholder
+WARN  sla             sla.rto_minutes not approved - replication-lag alerting uses a placeholder
+
+25 checks: 12 pass, 9 warn, 4 fail
+✔ rendered 35 services for 2 clusters into /home/claude/seaweedfs-deploy/build/lab
+
+▶ deploy cluster primary (active)
+✔ pushed rendered configs to 16 nodes
+✔ phase master   3 svc  gate PASS in   2.0s  leaders={'127.10.1.11:9333.19333'}
+✔ phase volume   6 svc  gate PASS in   1.0s  6 volume servers
+✔ phase filer    3 svc  gate PASS in   3.0s  3 healthy
+✔ phase s3       3 svc  gate PASS in   1.0s  3 healthy
+✔ phase admin    1 svc  gate PASS in   0.0s  running
+✔ phase worker   1 svc  gate PASS in   0.0s  running
+
+▶ bootstrap primary
+  create bucket under /buckets
+    created bucket archive
+    {
+      "version": 1,
+      "locations": [
+        {
+          "locationPrefix": "/buckets/archive/",
+          "collection": "",
+          "replication": "010",
+          "ttl": "",
+          "diskType": "ssd",
+          "fsync": false,
+          "volumeGrowthCount": 0,
+          "readOnly": false,
+          "dataCenter": "",
+          "rack": "",
+          "dataNode": "",
+          "maxFileNameLength": 0,
+          "disableChunkDeletion": false,
+          "wormGracePeriodSeconds": "0",
+          "wormRetentionTimeSeconds": "0"
+        }
+      ]
+    }
+
+▶ deploy cluster dr (standby)
+✔ pushed rendered configs to 16 nodes
+✔ phase master   3 svc  gate PASS in   2.0s  leaders={'127.20.1.11:9333.19333'}
+✔ phase volume   6 svc  gate PASS in   1.0s  6 volume servers
+✔ phase filer    3 svc  gate PASS in   3.0s  3 healthy
+✔ phase s3       3 svc  gate PASS in   1.0s  3 healthy
+✔ phase admin    1 svc  gate PASS in   0.0s  running
+✔ phase worker   1 svc  gate PASS in   0.0s  running
+
+▶ bootstrap dr
+  create bucket under /buckets
+    created bucket archive
+    {
+      "version": 1,
+      "locations": [
+        {
+          "locationPrefix": "/buckets/archive/",
+          "collection": "",
+          "replication": "010",
+          "ttl": "",
+          "diskType": "ssd",
+          "fsync": false,
+          "volumeGrowthCount": 0,
+          "readOnly": false,
+          "dataCenter": "",
+          "rack": "",
+          "dataNode": "",
+          "maxFileNameLength": 0,
+          "disableChunkDeletion": false,
+          "wormGracePeriodSeconds": "0",
+          "wormRetentionTimeSeconds": "0"
+        }
+      ]
+    }
+deploy+bootstrap of both clusters: 15s
+
+▶ verify primary
+✔ master  leaders={'127.10.1.11:9333.19333'}
+✔ volume  6 volume servers
+✔ filer   3 healthy
+✔ s3      3 healthy
+✔ admin   running
+✔ worker  running
+✔ metrics endpoints checked
+
+▶ verify dr
+✔ master  leaders={'127.20.1.11:9333.19333'}
+✔ volume  6 volume servers
+✔ filer   3 healthy
+✔ s3      3 healthy
+✔ admin   running
+✔ worker  running
+! sync    not running (start with: deploy --phase sync, after bootstrap)
+✔ metrics endpoints checked
+
+[A01] Inventory validation catches design defects before deploy
+  [33mFINDING[0m (0.0s) {'fail': ['ec-node-loss: [primary] EC 10+4 on 3 cold nodes puts up to 5 shards on one node > 4 parity: losing ONE cold node makes EC data unreadable. Need >= 4 cold nodes, or a narrower code (e.g. 6+3 / 4+2)', 'ec-rack-loss: [primary] EC 10+4 across 3 racks = 5 shards/rack > 4 parity: a rack failure makes EC data unreadable. Need >= 4 racks or a narrower code', 'ec-node-loss: [dr] EC 10+4 on 3 col
+
+[A02] v1.0 port plan reproduced on real binary (metricsPort = port+10000)
+  [33mFINDING[0m (12.0s) {'master -metricsPort=19333': 'exited rc=255; I0929 17:34:57.398449 net_timeout.go:171 skip starting on 127.99.0.1:9333: listen tcp 127.0.0.1:9333: bind: address already in use', 'volume -metricsPort=18080': 'still running; no bind error logged', 's3 -metricsPort=18333': 'still running; no bind error logged'}
+
+[A03] Phased deploy with health gates (primary + DR)
+  [32mPASS[0m (0.0s) [{'cluster': 'primary', 'phase': 'master', 'services': 3, 'ok': True, 'seconds': 2.0, 'detail': "leaders={'127.10.1.11:9333.19333'}"}, {'cluster': 'primary', 'phase': 'volume', 'services': 6, 'ok': True, 'seconds': 1.0, 'detail': '6 volume servers'}, {'cluster': 'primary', 'phase': 'filer', 'services': 3, 'ok': True, 'seconds': 3.0, 'detail': '3 healthy'}, {'cluster': 'primary', 'phase': 's3', 'se
+
+[A04] Deploy is idempotent (re-run on a running cluster)
+
+▶ deploy cluster primary (active)
+✔ pushed rendered configs to 16 nodes
+✔ phase master   3 svc  gate PASS in   0.0s  leaders={'127.10.1.11:9333.19333'}
+✔ phase volume   6 svc  gate PASS in   0.0s  6 volume servers
+✔ phase filer    3 svc  gate PASS in   0.0s  3 healthy
+✔ phase s3       3 svc  gate PASS in   0.0s  3 healthy
+✔ phase admin    1 svc  gate PASS in   0.0s  running
+✔ phase worker   1 svc  gate PASS in   0.0s  running
+  [32mPASS[0m (0.1s) {'rc': 0, 'restarted': []}
+
+[A05] Every Prometheus target answers (port plan works end-to-end)
+  [32mPASS[0m (0.1s) {'targets': 34, 'bad': []}
+
+[B01] Master Raft quorum: 3 members, 1 leader (each cluster)
+  [32mPASS[0m (0.0s) {'primary': "leaders={'127.10.1.11:9333.19333'}", 'dr': "leaders={'127.20.1.11:9333.19333'}"}
+
+[B02] Volume servers registered with correct DC / rack / disk type
+  [31mFAIL[0m (0.5s) {'primary': [], 'dr': []}
+
+[B03] DR is an independent cluster (no shared quorum)
+  [32mPASS[0m (0.0s) {'primary': '127.10.1.11:9333', 'dr': '127.20.1.11:9333'}
+
+[C01] S3 PUT/GET/HEAD/LIST/DELETE integrity (500 objects, 1 KB-2 MB)
+  [32mPASS[0m (8.0s) {'objects': 500, 'bad': [], 'listed': 500, 'delete_ok': True, 'put_seconds': 6.0}
+
+[C02] Multipart upload 64 MB (large XML/EDI batch)
+  [32mPASS[0m (1.7s) {'etag': '"e5d3a9a656e2fe8d75d39a99c22e2bb0-8"', 'size': 67108864}
+
+[C03] Read-your-write across gateways (different filers)
+  [32mPASS[0m (0.6s) {'max_visibility_lag_ms': 42, 'p50_ms': 16}
+
+[C04] Landing tier: new bucket data is on SSD with 010 (cross-rack) replicas
+  [32mPASS[0m (0.0s) {'volumes_with_data': 6, 'not_ssd': [], 'bad_replication': []}
+
+[D01] S3 IAM: anonymous / wrong secret / out-of-scope actions denied
+  [32mPASS[0m (0.0s) {'anonymous_get': 403, 'bad_secret': 403, 'app_create_bucket': 403, 'monitor_put': 403, 'monitor_list': 'allowed (expected)'}
+
+[D02] gRPC mTLS enforced (weed shell without client cert)
+  [32mPASS[0m (15.0s) shell could not establish a gRPC session within 15s (TLS handshake rejected)
+
+[D03] Volume write without JWT rejected
+  [32mPASS[0m (0.0s) HTTP 401
+
+[D04] Filer HTTP port bypasses S3 IAM (unauthenticated read)
+  [33mFINDING[0m (0.0s) filer HTTP returned object bytes without credentials. Firewall filer 8888/18888 to S3 gateways + ops only, and/or set [jwt.filer_signing(.read)] keys
+
+[D05] Master HTTP /dir/assign reachable without auth
+  [33mFINDING[0m (0.0s) master issued fid+JWT to an anonymous caller - JWT only protects volume servers if master HTTP 9333 is firewalled to cluster members; restrict with -whiteList or [guard] white_list
+
+[E01] S3 gateway crash (s3-01) behind F5 pool
+  [32mPASS[0m (31.3s) {'during': {'max_stall_s': 0.1, 'ops': 490, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 7, 'put_max_ms': 13}, 'after_restore': {'max_stall_s': 0.1, 'ops': 159, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 7, 'put_max_ms': 46}, 'lost_acked': 0}
+
+[E02] Filer crash (filer-01)
+  [32mPASS[0m (30.7s) {'during': {'max_stall_s': 0, 'ops': 0, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 0, 'put_max_ms': 0}, 'after_restore': {'max_stall_s': 0.1, 'ops': 164, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 7, 'put_max_ms': 11}, 'lost_acked': 0}
+
+[E03] Master LEADER crash
+  [32mPASS[0m (50.1s) {'old': '127.10.1.11:9333', 'new': '127.10.1.13:9333', 'election_s': 24.7, 'during': {'max_stall_s': 0.0, 'ops': 1, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 0, 'put_max_ms': 0}, 'after_restore': {'max_stall_s': 43.9, 'ops': 23, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 8, 'put_max_ms': 15}, 'lost_acked': 0}
+
+[E04] Hot volume server crash (hot-01)
+  [32mPASS[0m (44.4s) {'reads_with_hot01_down_bad': 0, 'during': {'max_stall_s': 0.1, 'ops': 786, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 8, 'put_max_ms': 59}, 'after_restore': {'max_stall_s': 0.1, 'ops': 160, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 8, 'put_max_ms': 15}, 'lost_acked': 0}
+
+[E05] Full RACK r1 loss (master, filer, s3, hot, cold, admin)
+  [32mPASS[0m (48.6s) {'hot_reads_bad': 0, 'leader_after': '127.10.1.13:9333', 'hosts_killed': ['primary-master-01', 'primary-filer-01', 'primary-s3-01', 'primary-hot-01', 'primary-cold-01', 'primary-admin'], 'during': {'max_stall_s': 15.1, 'ops': 556, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 7, 'put_max_ms': 15076}, 'after_restore': {'max_stall_s': 0.1, 'ops': 160, 'failed': 0, 'error_window_s':
+
+[E06] Rolling restart of every service (upgrade procedure) under load
+  [32mPASS[0m (171.8s) {'restarted': 15, 'minutes': 2.7, 'load': {'max_stall_s': 13.5, 'ops': 3587, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 7, 'put_max_ms': 13479}, 'lost_acked': 0}
+
+[F01] Enterprise Volume Tiering policy (tiering.apply / status)
+  [2mSKIP[0m (0.0s) OSS build in lab - tiering.* commands are Enterprise-only. Rendered policy: /home/claude/seaweedfs-deploy/build/lab/primary/_cluster/tiering.json. Run F01 on the Enterprise staging cluster.
+
+[F02] Hot(SSD, 010) -> Cold(HDD, EC 10+4) demotion after quiet period
+  [33mFINDING[0m (58.7s) {'ec_volumes': 18, 'shards_total': 252, 'shards_on_hot_nodes_pct': 12.7, 'worst_shards_on_one_node': 12, 'volumes_not_14_shards': [], 'ssd_volumes_with_data_after': 0, 'unreadable': [], 'encode_attempts': 3, 'shell_lock_contention_with_admin': False, 'encode_seconds': 48.8, 'encode_tail': '1:8080\ndeleted volume 2 from 127.10.10.11:8080\ndeleted volume 5 from 127.10.10.11:8080\ndeleted volume 3 fr
+
+[F02b] Re-balance EC shards onto the cold (HDD) tier
+  [33mFINDING[0m (6.9s) {'shards_total': 252, 'shards_on_hot_nodes_pct': 12.7, 'worst_shards_on_one_node': 12, 'volumes_not_14_shards': [], 'unreadable': 0, 'balance_tail': ''}
+
+[F03] Cold node loss with EC 10+4 on 3 cold nodes (v1.0 'Test D')
+  [33mFINDING[0m (106.3s) {'max_shards_on_one_node': {'127.10.10.11:8080': 7, '127.10.20.11:8081': 12, '127.10.20.12:8081': 1, '127.10.20.13:8081': 12, '127.10.10.13:8080': 9}, 'parity': 4, 'unreadable_while_down': '52/300', 'unreadable_after_restart': 0}
+
+[F04] New writes after demotion land on SSD again
+  [32mPASS[0m (9.3s) {'ssd_volumes_with_data': 6, 'hdd_replicated_volumes': 0}
+
+[G01] DR seed: initial snapshot replicated (incl. EC'd cold data)
+  [33mFINDING[0m (68.1s) {'log_replay_result': {'src_objects': 4612, 'dst_objects': 1035, 'missing_on_dst': 3577}, 'silent_gap_pct': 77.6, 'repair_copied': 3577, 'after_repair_missing': 0, 'note': 'seed via metadata-log replay silently missed objects (no error logged). A seed MUST be a snapshot/tree copy (Enterprise DM initial snapshot) and MUST be verified by listing+ETag diff before DR is declared ready'}
+
+[G02] Continuous replication lag (PUT on primary -> visible on DR)
+  [32mPASS[0m (8.0s) {'p50_s': 0.22, 'p95_s': 0.32, 'max_s': 0.32, 'rpo_s': 60}
+
+[G03] Delete propagation (mirror semantics)
+  [32mPASS[0m (0.4s) {'propagation_s': 0.41, 'note': 'a mirror is NOT a backup - keep a separate BACKUP policy with deletes OFF'}
+
+[G06] Replication source filer (filer-01) crash
+  [33mFINDING[0m (123.1s) {'acked': 219, 'missing_on_dr_after_90s': 2, 'catch_up_s': 94.0, 'load': {'max_stall_s': 15.4, 'ops': 438, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 7, 'put_max_ms': 15406}, 'repaired_by_reconcile': 2, 'note': 'single-source replication stream lost events written while its source filer was down; replication source must be HA and gaps must be detected by periodic reconcile'}
+
+[G04] Where do replicated objects land on DR?
+  [33mFINDING[0m (0.0s) {'dr_ssd_volumes': 12, 'dr_hdd_volumes': 0, 'note': "seeded data (incl. data already EC'd on primary) re-lands on DR SSD and is 'new' for quietForSeconds: DR SSD must absorb the whole seed, or seed with a DR-only short-quiet profile"}
+
+[G05] Same S3 identities work on DR (failover without app re-config)
+  [32mPASS[0m (0.0s) {'listed': 5}
+
+[H01] Unplanned PRIMARY DC loss under load: measured RPO
+  [32mPASS[0m (28.6s) {'acked_puts': 470, 'acked_after_kill_started': 0, 'kill_duration_s': 0.15, 'missing_on_dr': 1, 'rpo_observed_s': 0.01, 'rpo_target_s': 60}
+
+[H02] Activate DR (GSLB -> DR VIP): LIST/GET/PUT on DR
+  [32mPASS[0m (0.2s) {'list': 10, 'get_md5_ok': True, 'dr_put_list': 51, 'technical_rto_s': 13.8, 'note': 'lab RTO excludes human decision + DNS TTL'}
+
+[H03] Controlled failback: restore primary, replay DR writes, re-establish DR
+  [32mPASS[0m (17.9s) {'dr_writes_on_primary': '51/51', 'replay_s': 3.4, 'forward_replication_resumed': True, 'repair': None}
+
+[H04] Post-failback full consistency check primary vs DR
+  [33mFINDING[0m (11.1s) {'primary': 5382, 'dr': 5381, 'only_primary': ['dr/rpo/000469.bin'], 'only_dr': [], 'size_mismatch': [], 'only_primary_n': 1, 'only_dr_n': 0, 'note': 'divergence limited to writes acknowledged by primary but not yet replicated at crash time (the RPO window). They exist only on the recovered primary; reconcile before re-enabling DR mirror deletes.'}
+
+==== {'PASS': 25, 'FAIL': 1, 'FINDING': 11, 'SKIP': 1}  (14.2 min)  -> reports/e2e-results.json

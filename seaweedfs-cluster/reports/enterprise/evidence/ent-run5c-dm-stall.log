@@ -1,0 +1,52 @@
+
+[X05] Remediation: Enterprise custom EC 6+3 survives a cold node loss on 3 racks
+  [31mFAIL[0m (28.9s) exception: An error occurred (InternalError) when calling the PutObject operation (reached max retries: 4): We encountered an internal error, please try again.
+Traceback (most recent call last):
+  File "/home/claude/seaweedfs-deploy/tests/e2e_test.py", line 88, in run
+    status, evidence = fn()
+                       ^^^^
+  File "/home/claude/seaweedfs-deploy/tests/e2e_enterprise.py", line 324, i
+
+[X10] Initial snapshot completeness on a pre-loaded primary (written via all 3 gateways)
+  [32mPASS[0m (149.2s) {'phases': ['unspecified', 'snapshot', 'tailing', 'caught_up'], 'seconds_to_caught_up': 39.1, 'filesMoved': 3803, 'bytesMoved_mb': 410.9, 'snapshotEntriesWalked': 3042, 'src_objects': 3030, 'missing_on_dr': 0, 'size_mismatch': 0}
+
+[X11] CONTINUOUS lag (PUT via all 3 gateways -> visible on DR)
+  [32mPASS[0m (7.5s) {'p50_s': 0.21, 'p95_s': 0.32, 'max_s': 0.42, 'reported_lagSeconds': 0, 'phase': 'caught_up'}
+
+[X12] Delete propagation (mirror)
+  [32mPASS[0m (0.3s) {'propagation_s': 0.26}
+
+[X13] Primary filer-01 crash while writing (the v1/OSS gap scenario)
+  [32mPASS[0m (33.5s) {'acked': 258, 'missing_on_dr': 0, 'catch_up_s': 1.0, 'load': {'max_stall_s': 15.3, 'ops': 516, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 9, 'put_max_ms': 15304}}
+
+[X14] DR target filer crash (the filer the target points at)
+  [32mPASS[0m (34.0s) {'acked': 498, 'missing_on_dr': 0, 'catch_up_s': 1.6, 'load': {'max_stall_s': 0.1, 'ops': 996, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 9, 'put_max_ms': 37}}
+
+[X15] All Data Movement workers crash for 20 s
+  [31mFAIL[0m (277.6s) {'acked': 489, 'missing_on_dr': 445, 'catch_up_s': 246.1, 'load': {'max_stall_s': 0.1, 'ops': 978, 'failed': 0, 'error_window_s': 0.0, 'errors': [], 'put_p50_ms': 8, 'put_max_ms': 51}}
+
+[X16] BACKUP mode keeps objects deleted on Primary
+  [32mPASS[0m (176.8s) {'copied_s': 153.1, 'present_after_primary_delete': True, 'phase': 'unspecified'}
+
+[X17] Where does replicated data land on DR?
+  [33mFINDING[0m (0.0s) {'dr_ssd_volumes': 14, 'dr_hdd_volumes': 6, 'note': 'seed lands on DR SSD as new data; size DR SSD or use a short-quiet DR profile during seeding'}
+
+[X20] Unplanned Primary DC loss under load: RPO with Data Movement
+  [32mPASS[0m (29.3s) {'acked_puts': 439, 'missing_on_dr': 439, 'rpo_observed_s': 14.98}
+
+[X21] Activate DR: LIST/GET/PUT with application credentials
+  [32mPASS[0m (7.0s) {'list': 10, 'dr_writes': 50, 'rto_s': 21.3}
+
+[X22] Failback with a MIGRATE policy DR -> Primary (drain fence)
+  [31mFAIL[0m (22.2s) exception: <urlopen error [Errno 111] Connection refused>
+Traceback (most recent call last):
+  File "/usr/lib/python3.11/urllib/request.py", line 1348, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "/usr/lib/python3.11/http/client.py", line 1323, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "/usr/lib/python3.11/http/clien
+
+[X23] Post-failback consistency Primary vs DR
+  [31mFAIL[0m (19.4s) {'src_objects': 4494, 'dst_objects': 3660, 'missing_on_dst': 884, 'extra_on_dst': 50, 'size_mismatch': 0, 'rpo_window_objects': 439}
+
+==== {'PASS': 8, 'FAIL': 4, 'FINDING': 1, 'SKIP': 0} (13.1 min) -> reports/enterprise-rerun/e2e-enterprise-results.json

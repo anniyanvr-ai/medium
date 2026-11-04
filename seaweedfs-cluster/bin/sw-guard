@@ -1,0 +1,510 @@
+#!/usr/bin/env python3
+"""
+sw-guard - detect and (with --fix) remediate the SeaweedFS Enterprise failure modes found in the
+lab evaluation. Run it from cron/systemd every 5 minutes on the admin host; it is idempotent and
+every fix is gated on a re-check.
+
+  check  finding  detection                                         --fix
+  -----  -------  ------------------------------------------------  ---------------------------------------
+  dm     E-08     canary object not on DR within --rpo seconds;      1 expire the policy's job + detect
+         E-10     enabled policy with no running job / phase          2 admin + worker restart, then
+                  'unspecified'; job owned by a dead worker             reconcile the stall window (S3)
+  tier   E-03     EC set complete but a replicated copy remains      lock; volume.delete the leftover copy
+  layout E-07     master writable layout lists a volume that is      rolling master restart (followers first,
+                  erasure-coded or no longer exists                    leader last), gated on raft quorum
+  class  E-02     volumes of a tiered collection with no class       report only (writes predate the policy)
+  capacity E-12   free volume slots per tier < 20 % / < 10 %          report (page): a full hot tier stops all PUTs
+  sweep  E-13     (--sweep) objects written since the last sweep      copy what Data Movement skipped
+                  that are missing on DR (HEAD per key)
+
+  sw-guard -i inventory/production.yaml                     # report, exit 2 when anything is wrong
+  sw-guard -i inventory/production.yaml --fix               # remediate
+  sw-guard -i ... --check dm --fix --since 1791380000       # force the reconcile window start
+  sw-guard -i ... --json > /var/lib/sw-guard/last.json      # for monitoring
+
+State (last healthy canary per pair) is kept in --state so a stall window is reconciled from the
+last moment replication was known good. S3 credentials as for sw-canary (SRC_/DST_/AWS_*).
+"""
+import argparse
+import fnmatch
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+_l = importlib.machinery.SourceFileLoader("swctl", str(HERE / "swctl"))
+_s = importlib.util.spec_from_loader("swctl", _l)
+sw = importlib.util.module_from_spec(_s)
+sys.modules["swctl"] = sw
+_l.exec_module(sw)
+
+FINDINGS = []
+ACTIONS = []
+
+
+def note(check, level, msg, **data):
+    FINDINGS.append({"check": check, "level": level, "msg": msg, **data})
+    col = {"OK": "ok", "WARN": "warn", "FAIL": "fail", "FIXED": "ok"}[level]
+    sw.log(f"[{check}] {msg}", col)
+
+
+def act(check, msg):
+    ACTIONS.append({"check": check, "action": msg, "ts": time.time()})
+    sw.log(f"[{check}] FIX: {msg}", "info")
+
+
+def run(cmd, timeout=600):
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return r.returncode, r.stdout + r.stderr
+
+
+# --------------------------------------------------------------------------- #
+# helpers
+# --------------------------------------------------------------------------- #
+def s3_url(inv, cluster, override=None):
+    if override:
+        return override
+    scheme = "https" if inv.g.get("s3", {}).get("https") else "http"
+    return f"{scheme}://{inv.s3s(cluster)[0]}"
+
+
+def canary(src, dst, bucket, timeout):
+    rc, out = run([str(HERE / "sw-canary"), "--src", src, "--dst", dst, "--bucket", bucket,
+                   "--timeout", str(timeout), "--json"], timeout=timeout + 60)
+    try:
+        return json.loads(out.strip().splitlines()[-1])
+    except Exception:  # noqa: BLE001
+        return {"replicated": False, "key": out[-200:]}
+
+
+def services(inv, cluster, kinds):
+    return [s for s in inv.services(cluster) if s.kind in kinds]
+
+
+def restart(inv, svc, wait=5):
+    r = sw.Runner(inv)
+    r.stop(svc)
+    time.sleep(1)
+    r.start(svc)
+    time.sleep(wait)
+
+
+def worker_health(api):
+    _, ws = api.req("GET", "/api/plugin/workers")
+    alive = {}
+    now = time.time()
+    for w in ws if isinstance(ws, list) else []:
+        seen = w.get("LastSeenAt", "")
+        try:
+            import datetime as dt
+            t = dt.datetime.fromisoformat(re.sub(r"\.(\d{6})\d*", r".\1", seen)).timestamp()
+        except Exception:  # noqa: BLE001
+            t = 0
+        alive[w.get("WorkerID")] = now - t
+    return alive
+
+
+def dm_jobs(api):
+    j = api.jobs(500)
+    items = j.get("jobs", j) if isinstance(j, dict) else j
+    return [x for x in items or [] if x.get("job_type") == "data_movement"]
+
+
+# --------------------------------------------------------------------------- #
+# dm: replication stall (E-08 / E-10)
+# --------------------------------------------------------------------------- #
+def check_dm(inv, a, state):
+    rc = 0
+    for dst, cl in inv.clusters.items():
+        dmc = cl.get("data_movement")
+        if not dmc:
+            continue
+        src = cl["replicate_from"]
+        if a.cluster and a.cluster not in (src, dst):
+            continue
+        # the scheduler and workers themselves must be running (an interrupted restart leaves them down)
+        r = sw.Runner(inv)
+        down = [s_ for s_ in services(inv, src, {"admin", "worker"}) if not r.is_running(s_)]
+        if down:
+            note("dm", "FAIL", f"{src}: {', '.join(s_.name for s_ in down)} not running")
+            if a.fix:
+                for s_ in sorted(down, key=lambda x: x.kind != "admin"):     # admin first
+                    act("dm", f"start {s_.host}/{s_.name}")
+                    r.start(s_)
+                    time.sleep(10 if s_.kind == "admin" else 3)
+            else:
+                rc = 2
+                continue
+        api = sw._admin_api(inv, src)
+        src_s3, dst_s3 = s3_url(inv, src, a.src_s3), s3_url(inv, dst, a.dst_s3)
+        for pol in dmc.get("policies", []):
+            if pol.get("mode", "continuous") != "continuous":
+                continue
+            bucket = pol["source"].rstrip("/").split("/")[-1]
+            key = f"{src}->{dst}:{bucket}"
+            c = canary(src_s3, dst_s3, bucket, a.rpo)
+            if c.get("replicated"):
+                state[key] = time.time()
+                note("dm", "OK", f"{key} canary replicated in {c.get('lag_s')}s")
+                if a.sweep:
+                    rc |= sweep(a, state, key, src_s3, dst_s3, bucket)
+                continue
+            since = a.since or state.get(key) or (time.time() - a.default_window)
+            # diagnose
+            alive = worker_health(api)
+            jobs = [j for j in dm_jobs(api) if j.get("state") == "job_state_running"]
+            running = {re.sub(r".*policy (\S+).*", r"\1", j.get("summary", "")): j for j in jobs}
+            orphan = [j["job_id"] for j in jobs if alive.get(j.get("worker_id"), 1e9) > 90]
+            sts = {s.get("policy"): s for s in api.dm_status().get("statuses", []) or []}
+            st = sts.get(pol["name"], {})
+            unsched = pol["name"] not in running or st.get("phase") in (None, "", "unspecified")
+            note("dm", "FAIL", f"{key} canary NOT replicated within {a.rpo}s (policy phase={st.get('phase')}, "
+                 f"job={'running on ' + running[pol['name']]['worker_id'] if pol['name'] in running else 'none'}, "
+                 f"orphaned jobs={len(orphan)}, live workers={sum(1 for v in alive.values() if v < 90)})",
+                 since=since, orphaned=orphan, unscheduled=unsched)
+            # a policy that is replaying a backlog is slow, not stuck: do not restart it (that rewinds it again)
+            if st.get("phase") in ("tailing", "snapshot") and pol["name"] in running:
+                f0 = int(st.get("filesMoved") or 0)
+                time.sleep(45)
+                st2 = {s.get("policy"): s for s in api.dm_status().get("statuses", []) or []}.get(pol["name"], {})
+                if int(st2.get("filesMoved") or 0) > f0:
+                    note("dm", "WARN", f"{key}: catching up - phase {st2.get('phase')}, lag {st2.get('lagSeconds')} s, "
+                         f"{int(st2.get('filesMoved') or 0) - f0} files moved in 45 s; not restarting")
+                    rc = 2
+                    continue
+            if not a.fix:
+                rc = 2
+                continue
+            healed = False
+            # Ladder verified in the lab (sec. 11.3): the orphaned job keeps the policy's dedupe key 'running'
+            # (a restarted worker re-registers with the same id, and the admin persists the job across its own
+            # restarts), so nothing is re-proposed until the execution timeout. Expiring the job - the Admin UI
+            # 'Expire job' action - releases it without restarting anything; an admin+worker restart is rung 2.
+            def expire_and_detect():
+                for j in dm_jobs(api):
+                    if j.get("state") in ("job_state_running", "job_state_pending", "job_state_assigned") and \
+                            f"policy {pol['name']} " in j.get("summary", ""):
+                        code, _ = api.expire_job(j["job_id"], "sw-guard: replication canary failed (E-08)")
+                        act("dm", f"{key}: expired job {j['job_id']} on {j.get('worker_id')} -> HTTP {code}")
+                api.detect("data_movement")
+            ladder = [("expire the policy's job and trigger detection", expire_and_detect, 240),
+                      # after a restart the admin reloads the old job as 'running' with no live executor:
+                      # expire it again once the new workers are connected (seen in the lab, sec. 11.3)
+                      ("restart admin, then workers, then expire again", lambda: (
+                          [restart(inv, s_, 15) for s_ in services(inv, src, {"admin"})],
+                          [restart(inv, w, 5) for w in services(inv, src, {"worker"})],
+                          time.sleep(20), expire_and_detect()), a.max_heal)]
+            t_fix = time.time()
+            for desc, fn, budget in ladder:
+                act("dm", f"{key}: {desc}")
+                fn()
+                t0 = time.time()
+                while time.time() - t0 < budget:
+                    if canary(src_s3, dst_s3, bucket, 30).get("replicated"):
+                        healed = True
+                        break
+                    time.sleep(10)
+                if healed:
+                    break
+            if not healed:
+                note("dm", "FAIL", f"{key}: still stalled after the restart ladder - page on-call; "
+                     "the S3 reconcile below still closes the gap", since=since)
+                rc = 2
+            else:
+                state[key] = time.time()
+                note("dm", "FIXED", f"{key}: replication resumed {time.time() - t_fix:.0f}s after the first fix")
+            # close the gap: everything written since the last healthy canary (Data Movement does not
+            # always replay a stalled window - lab: 288 of 494 writes were never replayed)
+            act("dm", f"{key}: reconcile window since {time.strftime('%F %T', time.localtime(since))}")
+            cmd = [str(HERE / "s3-reconcile"), "--src", src_s3, "--dst", dst_s3, "--bucket", bucket,
+                   "--since", str(int(since - 60)), "--copy-missing", "--workers", str(a.workers)]
+            if a.date_layout:
+                cmd += ["--date-layout", a.date_layout]
+            r_rc, out = run(cmd, timeout=6 * 3600)
+            try:
+                rep = json.loads(out[out.index("{"):])
+            except Exception:  # noqa: BLE001
+                rep = {"raw": out[-400:]}
+            note("dm", "FIXED" if r_rc == 0 else "FAIL",
+                 f"{key}: reconcile checked {rep.get('src_objects')} objects, copied {rep.get('copied')}, "
+                 f"failures {rep.get('copy_failures')}", reconcile=rep)
+            rc |= 0 if r_rc == 0 else 2
+    return rc
+
+
+def sweep(a, state, key, src_s3, dst_s3, bucket):
+    """E-13: Data Movement silently skipped 2 of 34,722 objects under 10x peak load. Every run checks the
+    contiguous window since the last sweep (minus a settle margin) with HEADs and copies what is missing."""
+    until = time.time() - a.sweep_settle
+    since = state.get("swept:" + key) or (until - 3600)
+    if until - since < 60:
+        return 0
+    cmd = [str(HERE / "s3-reconcile"), "--src", src_s3, "--dst", dst_s3, "--bucket", bucket, "--head",
+           "--since", str(int(since)), "--until", str(int(until)), "--workers", str(a.workers)]
+    if a.date_layout:
+        cmd += ["--date-layout", a.date_layout]
+    if a.fix:
+        cmd.append("--copy-missing")
+    r_rc, out = run(cmd, timeout=3600)
+    try:
+        rep = json.loads(out[out.index("{"):])
+    except Exception:  # noqa: BLE001
+        note("dm", "FAIL", f"{key}: sweep failed: {out[-200:]}")
+        return 2
+    miss = rep.get("missing_on_dst", 0) + rep.get("size_mismatch", 0)
+    lvl = "OK" if not miss else ("FIXED" if a.fix and r_rc == 0 else "FAIL")
+    note("dm", lvl, f"{key}: sweep {time.strftime('%H:%M', time.localtime(since))}-{time.strftime('%H:%M', time.localtime(until))} "
+         f"checked {rep.get('src_objects')} objects, {miss} missing on DR" + (f", copied {rep.get('copied')}" if miss else ""),
+         sweep=rep)
+    if r_rc == 0:
+        state["swept:" + key] = until
+    return 0 if lvl in ("OK", "FIXED") else 2
+
+
+# --------------------------------------------------------------------------- #
+# tier: finish EC transitions (E-03) + unclassed volumes (E-02)
+# --------------------------------------------------------------------------- #
+def tiering_cfg(inv, cluster):
+    out = sw.weed_shell(inv, cluster, "tiering.get")
+    try:
+        return json.loads(out[out.index("{"):out.rindex("}") + 1])
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def ec_total_for(cfg, collection):
+    prof = {p["name"]: p for p in cfg.get("profiles", [])}
+    for b in cfg.get("bindings", []):
+        if fnmatch.fnmatch(collection, b.get("collectionPattern", "")):
+            p = prof.get(b.get("profileName"), {})
+            for t in p.get("tiers", []):
+                if t.get("ec"):
+                    return t["ec"]["dataShards"] + t["ec"]["parityShards"], b.get("volumeClass", "")
+    return None, None
+
+
+def ec_counts(inv, cluster):
+    cnt = {}
+    for vid, col, shards in re.findall(r"ec volume id:(\d+) collection:(\S*) shards:\[([\d ]*)\]",
+                                       sw.weed_shell(inv, cluster, "volume.list")):
+        k = (int(vid), col)
+        cnt[k] = cnt.get(k, 0) + len(shards.split())
+    return cnt
+
+
+def vol_status(inv, cluster):
+    for m in inv.masters(cluster):
+        code, body = sw.http_get(f"http://{m}/vol/status")
+        if code == 200:
+            out = []
+            for _dc, racks in json.loads(body)["Volumes"]["DataCenters"].items():
+                for _rack, nodes in racks.items():
+                    for node, vols in nodes.items():
+                        for v in vols or []:
+                            out.append({"node": node, "id": v["Id"], "collection": v["Collection"],
+                                        "disk": v.get("DiskType") or "hdd", "class": v.get("VolumeClass", ""),
+                                        "size": v["Size"]})
+            return out
+    return []
+
+
+def check_tier(inv, a, clusters):
+    rc = 0
+    for cl in clusters:
+        cfg = tiering_cfg(inv, cl)
+        if not cfg.get("bindings"):
+            continue
+        ec = ec_counts(inv, cl)
+        vols = vol_status(inv, cl)
+        leftovers, partial, unclassed = [], [], {}
+        for (vid, col), n in ec.items():
+            total, _ = ec_total_for(cfg, col)
+            if not total:
+                continue
+            reps = [v for v in vols if v["id"] == vid]
+            if n >= total and reps:
+                leftovers += [(vid, v["node"], col) for v in reps]
+            elif n < total:
+                partial.append((vid, col, n, total))
+        for v in vols:
+            total, vclass = ec_total_for(cfg, v["collection"])
+            if total and vclass and not v["class"] and v["size"] > 8:
+                unclassed.setdefault(v["collection"], set()).add(v["id"])
+        if partial:
+            note("tier", "WARN", f"{cl}: {len(partial)} EC set(s) still being written "
+                 f"(e.g. vol {partial[0][0]} {partial[0][2]}/{partial[0][3]} shards) - left alone", partial=partial)
+        for col, ids in unclassed.items():
+            note("tier", "WARN", f"{cl}: {len(ids)} volume(s) of tiered collection '{col}' have no volume class "
+                 "(written before the policy reached the filers, E-02) - they are never demoted; "
+                 "re-write or move them deliberately", volumes=sorted(ids))
+        if not leftovers:
+            note("tier", "OK", f"{cl}: no leftover replicas of erasure-coded volumes")
+            continue
+        note("tier", "FAIL" if not a.fix else "WARN",
+             f"{cl}: {len(leftovers)} replicated copy(ies) of fully erasure-coded volumes still present "
+             f"({sorted({v for v, _, _ in leftovers})}) - finding E-03", leftovers=leftovers)
+        if not a.fix:
+            rc = 2
+            continue
+        script = ["lock"] + [f"volume.delete -node={n} -volumeId={v}" for v, n, _ in leftovers] + ["unlock"]
+        act("tier", f"{cl}: " + "; ".join(script[1:-1]))
+        sw.weed_shell(inv, cl, "\n".join(script))
+        time.sleep(5)
+        still = [v for v in vol_status(inv, cl) if any(v["id"] == x for x, _, _ in leftovers)]
+        note("tier", "FIXED" if not still else "FAIL",
+             f"{cl}: leftover copies removed ({len(leftovers) - len(still)}/{len(leftovers)})")
+        rc |= 0 if not still else 2
+    return rc
+
+
+# --------------------------------------------------------------------------- #
+# layout: stale writable volumes on the masters (E-07)
+# --------------------------------------------------------------------------- #
+def stale_writables(inv, cl):
+    ec_ids = {v for v, _ in ec_counts(inv, cl)}
+    live = {v["id"] for v in vol_status(inv, cl)}
+    stale = {}
+    for m in inv.masters(cl):
+        code, body = sw.http_get(f"http://{m}/dir/status")
+        if code != 200:
+            continue
+        for lay in json.loads(body)["Topology"].get("Layouts") or []:
+            for vid in lay.get("writables") or []:
+                if vid in ec_ids or vid not in live:
+                    stale.setdefault(m, set()).add((lay.get("collection"), vid))
+    return stale
+
+
+def raft_leader(inv, cl):
+    for m in inv.masters(cl):
+        code, body = sw.http_get(f"http://{m}/cluster/status")
+        if code == 200:
+            return json.loads(body).get("Leader")
+    return None
+
+
+def check_layout(inv, a, clusters):
+    rc = 0
+    for cl in clusters:
+        stale = stale_writables(inv, cl)
+        if not stale:
+            note("layout", "OK", f"{cl}: master writable layouts consistent")
+            continue
+        sample = sorted({x for s in stale.values() for x in s})[:5]
+        note("layout", "FAIL", f"{cl}: {len(stale)} master(s) list erasure-coded/missing volumes as writable "
+             f"{sample} - S3 PUTs can fail with 'volume N not found' (E-07)", stale={k: sorted(v) for k, v in stale.items()})
+        if not a.fix:
+            rc = 2
+            continue
+        leader = raft_leader(inv, cl) or ""
+        masters = services(inv, cl, {"master"})
+        order = sorted(masters, key=lambda s: leader.startswith(s.ip))      # followers first, leader last
+        for s in order:
+            act("layout", f"{cl}: restart master {s.host}")
+            restart(inv, s, 3)
+            sw.wait_until(lambda: (raft_leader(inv, cl) is not None, None), 60, 2)
+            time.sleep(10)
+        left = stale_writables(inv, cl)
+        note("layout", "FIXED" if not left else "FAIL", f"{cl}: stale writables after rolling master restart: "
+             f"{sum(len(v) for v in left.values())}")
+        rc |= 0 if not left else 2
+    return rc
+
+
+# --------------------------------------------------------------------------- #
+# capacity: free volume slots per tier (E-12 - a full hot tier stops ALL writes)
+# --------------------------------------------------------------------------- #
+def check_capacity(inv, a, clusters):
+    import math
+    rc = 0
+    for cl in clusters:
+        kind = {f"{s.ip}:{s.http_port}": s.kind for s in inv.services(cl) if s.kind.startswith("volume")}
+        topo = None
+        for m in inv.masters(cl):
+            code, body = sw.http_get(f"http://{m}/dir/status")
+            if code == 200:
+                topo = json.loads(body)["Topology"]
+                break
+        if not topo:
+            note("capacity", "FAIL", f"{cl}: no master answered /dir/status")
+            rc = 2
+            continue
+        tiers = {}
+        for dc in topo.get("DataCenters") or []:
+            for rack in dc.get("Racks") or []:
+                for dn in rack.get("DataNodes") or []:
+                    k = kind.get(dn["Url"], "volume")
+                    used = dn.get("Volumes", 0) + math.ceil(dn.get("EcShards", 0) / 10)
+                    t = tiers.setdefault(k, {"max": 0, "used": 0, "racks_with_free": set()})
+                    t["max"] += dn.get("Max", 0)
+                    t["used"] += used
+                    if dn.get("Max", 0) - used > 0:
+                        t["racks_with_free"].add(rack["Id"])
+        for k, t in sorted(tiers.items()):
+            free = 1 - t["used"] / max(1, t["max"])
+            lvl = "OK" if free >= 0.20 and len(t["racks_with_free"]) >= 2 else ("WARN" if free >= 0.10 and
+                                                                                   len(t["racks_with_free"]) >= 2 else "FAIL")
+            note("capacity", lvl, f"{cl}: {k} {t['used']}/{t['max']} volume slots used ({free:.0%} free, "
+                 f"{len(t['racks_with_free'])} rack(s) with a free slot)"
+                 + ("" if lvl == "OK" else " - replication 010 needs free slots in 2 racks; when the hot tier is full "
+                    "every PUT fails with 'no writable volumes' (E-12): add capacity or demote (tiering pressure rule)"))
+            rc |= 2 if lvl == "FAIL" else 0
+    return rc
+
+
+# --------------------------------------------------------------------------- #
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("-i", "--inventory", required=True)
+    ap.add_argument("--cluster", help="limit to one cluster (default: all)")
+    ap.add_argument("--check", action="append", choices=["dm", "tier", "layout", "capacity"],
+                    help="repeatable; default all")
+    ap.add_argument("--fix", action="store_true")
+    ap.add_argument("--rpo", type=float, default=60, help="canary deadline in seconds")
+    ap.add_argument("--since", type=float, help="reconcile window start (epoch); default last healthy canary")
+    ap.add_argument("--default-window", type=float, default=7200,
+                    help="window when no healthy canary is on record (s)")
+    ap.add_argument("--max-heal", type=float, default=900, help="budget for the last restart rung (s)")
+    ap.add_argument("--date-layout", default="", help="key layout for partitioned reconcile, e.g. 'ingest/%%Y/%%m/%%d/'")
+    ap.add_argument("--workers", type=int, default=32)
+    ap.add_argument("--sweep", action="store_true", help="also HEAD-check everything written since the last sweep (E-13)")
+    ap.add_argument("--sweep-settle", type=float, default=300, help="leave the newest N seconds to Data Movement")
+    ap.add_argument("--src-s3")
+    ap.add_argument("--dst-s3")
+    ap.add_argument("--state", help="state file (default <build_dir>/sw-guard-state.json)")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args()
+    inv = sw.Inventory(a.inventory)
+    out = sys.stdout
+    if a.json:                       # human log -> stderr, JSON report -> stdout
+        sys.stdout = sys.stderr
+    sf = Path(a.state or inv.build_dir / "sw-guard-state.json")
+    state = json.loads(sf.read_text()) if sf.exists() else {}
+    checks = a.check or ["dm", "tier", "layout", "capacity"]
+    clusters = [a.cluster] if a.cluster else list(inv.clusters)
+    rc = 0
+    if "dm" in checks:
+        rc |= check_dm(inv, a, state)
+    if "tier" in checks:
+        rc |= check_tier(inv, a, clusters)
+    if "layout" in checks:
+        rc |= check_layout(inv, a, clusters)
+    if "capacity" in checks:
+        rc |= check_capacity(inv, a, clusters)
+    sf.parent.mkdir(parents=True, exist_ok=True)
+    sf.write_text(json.dumps(state))
+    if a.json:
+        out.write(json.dumps({"ts": time.time(), "rc": rc, "findings": FINDINGS, "actions": ACTIONS},
+                             indent=1, default=str) + "\n")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

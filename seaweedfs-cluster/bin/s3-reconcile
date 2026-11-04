@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""
+s3-reconcile - compare (and optionally repair) a bucket between two S3 endpoints.
+
+Used for: verifying a DR seed, proving convergence before failback, and repairing gaps such as
+writes acknowledged by the Primary but never replicated (DC loss RPO window, Data Movement stall
+E-08, timestamp-replay gap E-09). Compares key + size (+ ETag when both are single-part).
+Never deletes unless --delete-extra.
+
+Full compare (small buckets, seed verification):
+    s3-reconcile --src https://s3-primary --dst https://s3-dr --bucket archive
+Repair only a time window - the normal mode at 1M+ objects/day:
+    s3-reconcile ... --since 2026-10-07T14:00Z --until 2026-10-07T16:00Z --copy-missing
+Date-partitioned keys (<prefix>YYYY/MM/DD/...): only the partitions of the window are listed,
+in parallel, and each source key is checked on the destination with a HEAD (no DST listing):
+    s3-reconcile ... --since 2026-10-07T14:00Z --date-layout 'ingest/%Y/%m/%d/' --copy-missing
+Spread a full compare over N parallel listings by key prefix:
+    s3-reconcile ... --fanout 0123456789abcdef
+
+credentials: SRC_AWS_ACCESS_KEY_ID / SRC_AWS_SECRET_ACCESS_KEY, DST_... (fallback AWS_*)
+exit: 0 = converged (or fully repaired), 2 = differences remain, 1 = error
+"""
+import argparse
+import concurrent.futures as cf
+import datetime as dt
+import json
+import os
+import sys
+import tempfile
+import time
+
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
+
+MULTIPART_THRESHOLD = 64 * 1024 * 1024
+
+
+def client(ep, side, pool=64):
+    ak = os.environ.get(f"{side}_AWS_ACCESS_KEY_ID") or os.environ.get("AWS_ACCESS_KEY_ID")
+    sk = os.environ.get(f"{side}_AWS_SECRET_ACCESS_KEY") or os.environ.get("AWS_SECRET_ACCESS_KEY")
+    return boto3.client("s3", endpoint_url=ep, aws_access_key_id=ak, aws_secret_access_key=sk,
+                        region_name=os.environ.get("AWS_REGION", "us-east-1"),
+                        config=Config(s3={"addressing_style": "path"}, max_pool_connections=pool,
+                                      retries={"max_attempts": 5, "mode": "standard"}))
+
+
+def parse_ts(v):
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except ValueError:
+        return dt.datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp()
+
+
+def listing(c, bucket, prefix="", since=None, until=None):
+    """{key: (size, etag)} - filtered on LastModified when since/until are given."""
+    out, token = {}, None
+    while True:
+        kw = dict(Bucket=bucket, Prefix=prefix, MaxKeys=1000)
+        if token:
+            kw["ContinuationToken"] = token
+        r = c.list_objects_v2(**kw)
+        for o in r.get("Contents", []):
+            t = o["LastModified"].timestamp()
+            if (since is None or t >= since) and (until is None or t <= until):
+                out[o["Key"]] = (o["Size"], o["ETag"].strip('"'))
+        token = r.get("NextContinuationToken")
+        if not token:
+            return out
+
+
+def partitions(prefix, fanout, date_layout, since, until):
+    """Key prefixes to list in parallel."""
+    if date_layout:
+        if since is None:
+            raise SystemExit("--date-layout needs --since")
+        end = until or time.time()
+        day = dt.datetime.fromtimestamp(since, dt.timezone.utc).date()
+        last = dt.datetime.fromtimestamp(end, dt.timezone.utc).date()
+        out = []
+        while day <= last:
+            out.append(day.strftime(date_layout))
+            day += dt.timedelta(days=1)
+        return out
+    if fanout:
+        return [prefix + ch for ch in fanout]
+    return [prefix]
+
+
+def same(a, b):
+    if a[0] != b[0]:
+        return False
+    if "-" in a[1] or "-" in b[1]:        # multipart ETags differ by part size; size is the check
+        return True
+    return a[1] == b[1]
+
+
+def copy(s, d, bucket, k, size):
+    h = s.head_object(Bucket=bucket, Key=k)
+    extra = {"Metadata": h.get("Metadata", {})}
+    if h.get("ContentType"):
+        extra["ContentType"] = h["ContentType"]
+    if size < MULTIPART_THRESHOLD:
+        body = s.get_object(Bucket=bucket, Key=k)["Body"].read()
+        d.put_object(Bucket=bucket, Key=k, Body=body, **extra)
+    else:                                 # stream large objects through a spooled temp file
+        with tempfile.TemporaryFile() as f:
+            s.download_fileobj(bucket, k, f)
+            f.seek(0)
+            d.upload_fileobj(f, bucket, k, ExtraArgs=extra)
+
+
+def reconcile(src_ep, dst_ep, bucket, prefix="", copy_missing=False, delete_extra=False, workers=16,
+              src_client=None, dst_client=None, since=None, until=None, fanout="", date_layout="",
+              head_check=None):
+    s = src_client or client(src_ep, "SRC", workers + 8)
+    d = dst_client or client(dst_ep, "DST", workers + 8)
+    t0 = time.time()
+    parts = partitions(prefix, fanout, date_layout, since, until)
+    windowed = since is not None or until is not None
+    head_check = windowed if head_check is None else head_check
+    a, b = {}, {}
+    with cf.ThreadPoolExecutor(min(workers, max(1, len(parts)))) as ex:
+        for r in ex.map(lambda p: listing(s, bucket, p, since, until), parts):
+            a.update(r)
+        if not head_check:
+            for r in ex.map(lambda p: listing(d, bucket, p), parts):
+                b.update(r)
+    if head_check:                        # check only the source keys of the window on the destination
+        def head(k):
+            try:
+                h = d.head_object(Bucket=bucket, Key=k)
+                return k, (h["ContentLength"], h["ETag"].strip('"'))
+            except ClientError as e:
+                if e.response["Error"]["Code"] in ("404", "NoSuchKey", "NotFound"):
+                    return k, None
+                raise
+        with cf.ThreadPoolExecutor(workers) as ex:
+            for k, v in ex.map(head, list(a)):
+                if v:
+                    b[k] = v
+    missing = sorted(set(a) - set(b))
+    extra = [] if head_check else sorted(set(b) - set(a))
+    changed = sorted(k for k in set(a) & set(b) if not same(a[k], b[k]))
+    copied, failed = 0, []
+    if copy_missing and (missing or changed):
+        with cf.ThreadPoolExecutor(workers) as ex:
+            futs = {ex.submit(copy, s, d, bucket, k, a[k][0]): k for k in missing + changed}
+            for fut in cf.as_completed(futs):
+                try:
+                    fut.result()
+                    copied += 1
+                except Exception as e:  # noqa: BLE001
+                    failed.append(f"{futs[fut]}: {str(e)[:120]}")
+    deleted = 0
+    if delete_extra and not head_check:
+        for k in extra:
+            d.delete_object(Bucket=bucket, Key=k)
+            deleted += 1
+    return {"bucket": bucket, "partitions": len(parts), "window": [since, until] if windowed else None,
+            "mode": "head" if head_check else "list", "src_objects": len(a), "dst_objects": len(b),
+            "missing_on_dst": len(missing), "extra_on_dst": len(extra), "size_mismatch": len(changed),
+            "copied": copied, "copy_failures": len(failed), "deleted": deleted,
+            "elapsed_s": round(time.time() - t0, 1), "sample_missing": missing[:5],
+            "sample_extra": extra[:5], "sample_failures": failed[:5]}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--src", required=True)
+    ap.add_argument("--dst", required=True)
+    ap.add_argument("--bucket", required=True)
+    ap.add_argument("--prefix", default="")
+    ap.add_argument("--since", help="epoch seconds or ISO-8601; only source objects modified at/after")
+    ap.add_argument("--until", help="epoch seconds or ISO-8601")
+    ap.add_argument("--date-layout", default="", help="strftime prefix layout of date-partitioned keys")
+    ap.add_argument("--fanout", default="", help="characters appended to --prefix for parallel listing")
+    ap.add_argument("--head", action="store_true", help="HEAD each source key on dst instead of listing dst")
+    ap.add_argument("--copy-missing", action="store_true")
+    ap.add_argument("--delete-extra", action="store_true", help="dangerous: mirror deletes (list mode only)")
+    ap.add_argument("--workers", type=int, default=16)
+    a = ap.parse_args()
+    try:
+        r = reconcile(a.src, a.dst, a.bucket, a.prefix, a.copy_missing, a.delete_extra, a.workers,
+                      since=parse_ts(a.since), until=parse_ts(a.until), fanout=a.fanout,
+                      date_layout=a.date_layout, head_check=True if a.head else None)
+    except Exception as e:  # noqa: BLE001
+        print(json.dumps({"error": str(e)}))
+        return 1
+    print(json.dumps(r, indent=2))
+    left = r["missing_on_dst"] + r["size_mismatch"] - r["copied"]
+    return 0 if left <= 0 and not r["copy_failures"] else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

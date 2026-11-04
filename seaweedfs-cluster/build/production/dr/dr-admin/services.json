@@ -1,0 +1,54 @@
+[
+  {
+    "name": "seaweed-admin",
+    "kind": "admin",
+    "phase": "admin",
+    "ip": "10.20.6.11",
+    "http": 23646,
+    "grpc": 33646,
+    "metrics": 9329,
+    "args": [
+      "admin",
+      "-ip=10.20.6.11",
+      "-port=23646",
+      "-master=10.20.1.11:9333,10.20.1.12:9333,10.20.1.13:9333",
+      "-dataDir=/data/seaweed/admin",
+      "-metricsIp=10.20.6.11",
+      "-metricsPort=9329"
+    ]
+  },
+  {
+    "name": "seaweed-worker1",
+    "kind": "worker",
+    "phase": "worker",
+    "ip": "10.20.6.11",
+    "http": null,
+    "grpc": null,
+    "metrics": 9330,
+    "args": [
+      "worker",
+      "-admin=10.20.6.11:23646",
+      "-workingDir=/data/seaweed/worker1",
+      "-jobType=all",
+      "-metricsIp=10.20.6.11",
+      "-metricsPort=9330"
+    ]
+  },
+  {
+    "name": "seaweed-worker2",
+    "kind": "worker",
+    "phase": "worker",
+    "ip": "10.20.6.11",
+    "http": null,
+    "grpc": null,
+    "metrics": 9331,
+    "args": [
+      "worker",
+      "-admin=10.20.6.11:23646",
+      "-workingDir=/data/seaweed/worker2",
+      "-jobType=all",
+      "-metricsIp=10.20.6.11",
+      "-metricsPort=9331"
+    ]
+  }
+]

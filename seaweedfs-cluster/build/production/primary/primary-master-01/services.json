@@ -1,0 +1,22 @@
+[
+  {
+    "name": "seaweed-master",
+    "kind": "master",
+    "phase": "master",
+    "ip": "10.10.1.11",
+    "http": 9333,
+    "grpc": 19333,
+    "metrics": 9324,
+    "args": [
+      "master",
+      "-ip=10.10.1.11",
+      "-port=9333",
+      "-mdir=/data/seaweed/master",
+      "-peers=10.10.1.11:9333,10.10.1.12:9333,10.10.1.13:9333",
+      "-volumeSizeLimitMB=30000",
+      "-defaultReplication=010",
+      "-metricsIp=10.10.1.11",
+      "-metricsPort=9324"
+    ]
+  }
+]

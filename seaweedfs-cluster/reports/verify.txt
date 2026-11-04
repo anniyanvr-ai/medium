@@ -1,0 +1,19 @@
+
+▶ verify primary
+✔ master  leaders={'127.10.1.11:9333.19333'}
+✔ volume  6 volume servers
+✔ filer   3 healthy
+✔ s3      3 healthy
+✔ admin   running
+✔ worker  running
+✔ metrics endpoints checked
+
+▶ verify dr
+✔ master  leaders={'127.20.1.11:9333.19333'}
+✔ volume  6 volume servers
+✔ filer   3 healthy
+✔ s3      3 healthy
+✔ admin   running
+✔ worker  running
+! sync    not running (start with: deploy --phase sync, after bootstrap)
+✔ metrics endpoints checked

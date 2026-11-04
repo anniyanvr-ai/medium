@@ -1,0 +1,121 @@
+{
+  "inventory": "/home/claude/seaweedfs-deploy/inventory/lab-ent.yaml",
+  "weed_version": "version 8000GB 4.48-enterprise 5d7398cf linux amd64",
+  "minutes": 24.3,
+  "summary": {
+    "PASS": 3,
+    "FAIL": 3,
+    "FINDING": 0,
+    "SKIP": 0
+  },
+  "results": [
+    {
+      "id": "X05",
+      "category": "tiering",
+      "title": "Remediation: Enterprise custom EC 6+3 survives a cold node loss on 3 racks",
+      "expected": "max 3 shards per node <= 3 parity: 0 unreadable with one cold node down",
+      "status": "PASS",
+      "evidence": {
+        "demoted": true,
+        "operator_finishing_replicas_deleted": 10,
+        "ec_volumes": 8,
+        "worst_shards_on_one_node": 3,
+        "unreadable_with_cold01_down": "0/200"
+      },
+      "seconds": 267.2
+    },
+    {
+      "id": "X16",
+      "category": "data-movement",
+      "title": "BACKUP mode keeps objects deleted on Primary",
+      "expected": "backup copy retains a deleted object (deletes OFF)",
+      "status": "FAIL",
+      "evidence": {
+        "copied_s": 300.2,
+        "present_after_primary_delete": false,
+        "phase": "unspecified"
+      },
+      "seconds": 323.7
+    },
+    {
+      "id": "X20",
+      "category": "failover",
+      "title": "Unplanned Primary DC loss under load: RPO with Data Movement",
+      "expected": "acknowledged writes missing on DR <= RPO window",
+      "status": "PASS",
+      "evidence": {
+        "acked_puts": 413,
+        "missing_on_dr": 2,
+        "rpo_observed_s": 0.07
+      },
+      "seconds": 30.0
+    },
+    {
+      "id": "X21",
+      "category": "failover",
+      "title": "Activate DR: LIST/GET/PUT with application credentials",
+      "expected": "all succeed",
+      "status": "PASS",
+      "evidence": {
+        "list": 10,
+        "dr_writes": 50,
+        "rto_s": 21.8
+      },
+      "seconds": 6.9
+    },
+    {
+      "id": "X22",
+      "category": "failover",
+      "title": "Failback with a MIGRATE policy DR -> Primary (drain fence)",
+      "expected": "DR-era writes on Primary; policy reports a cut-over-ready phase; forward replication re-established",
+      "status": "FAIL",
+      "evidence": {
+        "migrate_phases": [
+          "unspecified",
+          "tailing",
+          "caught_up",
+          "unspecified",
+          "caught_up",
+          "unspecified",
+          "caught_up",
+          "unspecified",
+          "caught_up"
+        ],
+        "seconds": 602.1,
+        "dr_writes_on_primary": "13/50",
+        "forward_resumed_s": null,
+        "last_status": {
+          "phase": "caught_up",
+          "lagSeconds": 0,
+          "postFenceEvents": 0,
+          "lastError": ""
+        }
+      },
+      "seconds": 809.9
+    },
+    {
+      "id": "X23",
+      "category": "failover",
+      "title": "Post-failback consistency Primary vs DR",
+      "expected": "only the RPO-window writes differ",
+      "status": "FAIL",
+      "evidence": {
+        "src_objects": 4167,
+        "dst_objects": 4203,
+        "missing_on_dst": 1,
+        "extra_on_dst": 37,
+        "size_mismatch": 0,
+        "rpo_window_objects": 2
+      },
+      "seconds": 19.1
+    }
+  ],
+  "tiering_before_after": {
+    "before": null,
+    "after": null,
+    "policy_propagation_s": null
+  },
+  "replication": {
+    "seed": null
+  }
+}

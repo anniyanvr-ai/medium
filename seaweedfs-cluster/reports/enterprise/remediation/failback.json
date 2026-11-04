@@ -1,0 +1,53 @@
+{
+ "steps": [
+  {
+   "step": "start",
+   "rc": 0,
+   "s": 390,
+   "log": "primary: disable forward policy archive-primary-to-dr -> HTTP 200\n\u2714 dr: target dr-to-primary -> HTTP 200 \n\u2714 dr: policy failback-dr-to-primary (snapshot ON, deletes OFF) -> HTTP 200 \n\u2714 failback-dr-to-primary scheduled after 390s"
+  },
+  {
+   "step": "verify",
+   "rc": 0,
+   "s": 4,
+   "log": "\u2714 canary dr->primary: canary _canary/2026/10/07/1791396240281: replicated in 0.51s\n  round 1: dr objects=201 missing on primary=0 copied=0 failures=0\n\u2714 primary contains every dr object - ready for cutover"
+  },
+  {
+   "step": "cutover",
+   "rc": 0,
+   "s": 153,
+   "log": "final dr->primary reconcile: missing=0 copied=0\n  dr: disable failback-dr-to-primary -> HTTP 200\n  primary->dr reconcile (RPO-window objects): missing=1686 copied=1686\n  primary: re-enable archive-primary-to-dr -> HTTP 200\n\u2714 forward replication resumed after 137s"
+  }
+ ],
+ "rows": [
+  [
+   "1 start",
+   "forward policy disabled; DR\u2192Primary policy (snapshot ON, deletes OFF) created; rc=0, 390 s: dr: policy failback-dr-to-primary (snapshot ON, deletes OFF) -> HTTP 200 | failback-dr-to-primary scheduled after 390s"
+  ],
+  [
+   "2 DR-era writes",
+   "200 objects written on DR after the forward policy was disabled"
+  ],
+  [
+   "3 replicated by Data Movement alone (60 s)",
+   "200/200 DR-era objects on the Primary"
+  ],
+  [
+   "4 verify (canary + reconcile loop)",
+   "rc=0, 4 s: canary dr->primary: canary _canary/2026/10/07/1791396240281: replicated in 0.51s | round 1: dr objects=201 missing on primary=0 copied=0 failures=0 | primary contains every dr object - ready for cutover"
+  ],
+  [
+   "5 DR-era objects on the Primary after verify",
+   "200/200"
+  ],
+  [
+   "6 cutover",
+   "rc=0, 153 s: dr: disable failback-dr-to-primary -> HTTP 200 | primary->dr reconcile (RPO-window objects): missing=1686 copied=1686 | primary: re-enable archive-primary-to-dr -> HTTP 200 | forward replication resumed after 137s"
+  ],
+  [
+   "7 forward replication after cutover",
+   "canary _canary/2026/10/07/1791396396961: replicated in 0.51s"
+  ]
+ ],
+ "verdict": "200/200 DR-era writes on the Primary before cut-over (200 by Data Movement alone in 60 s, rest by the reconcile gate); forward mirror resumed after cut-over"
+}

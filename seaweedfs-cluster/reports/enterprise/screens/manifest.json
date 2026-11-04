@@ -1,0 +1,218 @@
+[
+  {
+    "n": 1,
+    "file": "01-primary-dashboard.png",
+    "step": "1. Deploy",
+    "page": "/",
+    "cluster": "primary",
+    "caption": "Primary Admin dashboard right after swctl deploy + bootstrap (Enterprise 4.48)",
+    "time": "14:16:06"
+  },
+  {
+    "n": 2,
+    "file": "02-primary-cluster_volume-servers.png",
+    "step": "1. Deploy",
+    "page": "/cluster/volume-servers",
+    "cluster": "primary",
+    "caption": "6 volume servers: hot (ssd) and cold (hdd) per rack r1-r3",
+    "time": "14:16:09"
+  },
+  {
+    "n": 3,
+    "file": "03-primary-storage_tiering.png",
+    "step": "2. Tiering policy",
+    "page": "/storage/tiering",
+    "cluster": "primary",
+    "caption": "Volume Tiering after tiering.apply of the production policy (archive -> archive-hot-cold, 7,776,000 s)",
+    "time": "14:16:13"
+  },
+  {
+    "n": 4,
+    "file": "04-primary-plugin_lanes_default.png",
+    "step": "2. Tiering policy",
+    "page": "/plugin/lanes/default",
+    "cluster": "primary",
+    "caption": "Plugin workers registered with the Admin (default lane)",
+    "time": "14:16:16"
+  },
+  {
+    "n": 5,
+    "file": "05-primary-storage_volumes.png",
+    "step": "3. Hot -> Cold (before)",
+    "page": "/storage/volumes",
+    "cluster": "primary",
+    "caption": "BEFORE demotion: archive data on SSD volumes, replication 010",
+    "time": "14:16:32"
+  },
+  {
+    "n": 6,
+    "file": "06-primary-storage_collections.png",
+    "step": "3. Hot -> Cold (before)",
+    "page": "/storage/collections",
+    "cluster": "primary",
+    "caption": "Collections before demotion",
+    "time": "14:16:35"
+  },
+  {
+    "n": 7,
+    "file": "07-primary-storage_ec-shards.png",
+    "step": "3. Hot -> Cold (after)",
+    "page": "/storage/ec-shards",
+    "cluster": "primary",
+    "caption": "AFTER demotion: archive volumes are EC 10+4 shards on the HDD tier",
+    "time": "14:28:29"
+  },
+  {
+    "n": 8,
+    "file": "08-primary-storage_volumes.png",
+    "step": "3. Hot -> Cold (after)",
+    "page": "/storage/volumes",
+    "cluster": "primary",
+    "caption": "AFTER demotion: SSD volumes emptied (only new landing volumes remain)",
+    "time": "14:28:32"
+  },
+  {
+    "n": 9,
+    "file": "09-primary-storage_tiering.png",
+    "step": "3. Hot -> Cold (after)",
+    "page": "/storage/tiering",
+    "cluster": "primary",
+    "caption": "Volume Tiering overview after the worker demoted the quiet volumes",
+    "time": "14:28:36"
+  },
+  {
+    "n": 10,
+    "file": "10-primary-storage_ec-shards.png",
+    "step": "4. EC failure domains",
+    "page": "/storage/ec-shards",
+    "cluster": "primary",
+    "caption": "cold-01 stopped: EC 10+4 volumes missing 5 of 14 shards",
+    "time": "14:31:58"
+  },
+  {
+    "n": 11,
+    "file": "11-primary-storage_ec-shards.png",
+    "step": "4. EC failure domains",
+    "page": "/storage/ec-shards",
+    "cluster": "primary",
+    "caption": "archive63 bucket demoted to EC 6+3 (max 3 shards per cold node)",
+    "time": "14:33:13"
+  },
+  {
+    "n": 12,
+    "file": "12-primary-data-movement_targets.png",
+    "step": "5. Data Movement setup",
+    "page": "/data-movement/targets",
+    "cluster": "primary",
+    "caption": "Target primary-to-dr: DR filer gRPC 127.20.4.11:18888 with mTLS files",
+    "time": "14:33:41"
+  },
+  {
+    "n": 13,
+    "file": "13-primary-data-movement.png",
+    "step": "5. Data Movement setup",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "Policy archive-primary-to-dr created: CONTINUOUS, initial snapshot ON, deletes ON",
+    "time": "14:33:48"
+  },
+  {
+    "n": 14,
+    "file": "14-primary-data-movement.png",
+    "step": "6. Initial snapshot",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "Policy CAUGHT_UP after the initial snapshot",
+    "time": "14:34:21"
+  },
+  {
+    "n": 15,
+    "file": "15-primary-plugin_lanes_movement.png",
+    "step": "6. Initial snapshot",
+    "page": "/plugin/lanes/movement",
+    "cluster": "primary",
+    "caption": "Movement lane: data_movement jobs executed by the workers",
+    "time": "14:34:25"
+  },
+  {
+    "n": 16,
+    "file": "16-primary-data-movement.png",
+    "step": "7. Replication under failure",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "dr/srcfail: fault active, policy status during the outage",
+    "time": "14:34:49"
+  },
+  {
+    "n": 17,
+    "file": "17-primary-data-movement.png",
+    "step": "7. Replication under failure",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "dr/dstfail: fault active, policy status during the outage",
+    "time": "14:35:50"
+  },
+  {
+    "n": 18,
+    "file": "18-primary-data-movement.png",
+    "step": "8. Backup policy",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "BACKUP policy (deletes OFF) next to the CONTINUOUS mirror",
+    "time": "14:41:32"
+  },
+  {
+    "n": 19,
+    "file": "19-dr-dashboard.png",
+    "step": "9. DC failover",
+    "page": "/",
+    "cluster": "dr",
+    "caption": "DR Admin dashboard while Primary is down: DR serving LIST/GET/PUT",
+    "time": "14:42:06"
+  },
+  {
+    "n": 20,
+    "file": "20-dr-object-store_buckets.png",
+    "step": "9. DC failover",
+    "page": "/object-store/buckets",
+    "cluster": "dr",
+    "caption": "DR buckets: archive holds the replicated data plus DR-era writes",
+    "time": "14:42:09"
+  },
+  {
+    "n": 21,
+    "file": "21-primary-data-movement.png",
+    "step": "10. Failback",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "Primary Admin after failback: forward CONTINUOUS mirror re-enabled",
+    "time": "14:42:48"
+  },
+  {
+    "n": 22,
+    "file": "22-primary-data-movement.png",
+    "step": "7. Replication under failure",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "dr/workerfail: fault active, policy status during the outage",
+    "time": "14:43:04"
+  },
+  {
+    "n": 23,
+    "file": "23-primary-data-movement.png",
+    "step": "7. Replication under failure",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "After all workers were killed and restarted: status still shows the dead worker's last state",
+    "time": "14:47:26"
+  },
+  {
+    "n": 24,
+    "file": "24-primary-plugin_lanes_movement.png",
+    "step": "7. Replication under failure",
+    "page": "/plugin/lanes/movement",
+    "cluster": "primary",
+    "caption": "Movement lane: data_movement job still 'running' on the dead worker id",
+    "time": "14:47:30"
+  }
+]

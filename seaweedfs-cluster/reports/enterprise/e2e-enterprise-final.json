@@ -1,0 +1,501 @@
+{
+  "inventory": "/home/claude/seaweedfs-deploy/inventory/lab-ent.yaml",
+  "weed_version": "version 8000GB 4.48-enterprise 5d7398cf linux amd64",
+  "minutes": 55.8,
+  "summary": {
+    "PASS": 10,
+    "FAIL": 3,
+    "FINDING": 4,
+    "SKIP": 0
+  },
+  "results": [
+    {
+      "id": "X01",
+      "category": "enterprise",
+      "title": "Enterprise build and default dev/test licence active on every master",
+      "expected": "masters log the Enterprise licence (25 TB dev/test, no key file)",
+      "status": "PASS",
+      "evidence": {
+        "version": "version 8000GB 4.48-enterprise 5d7398cf linux amd64",
+        "masters": {
+          "primary-master-01": "25TB licence",
+          "primary-master-02": "25TB licence",
+          "primary-master-03": "25TB licence",
+          "dr-master-01": "25TB licence",
+          "dr-master-02": "25TB licence",
+          "dr-master-03": "25TB licence"
+        }
+      },
+      "seconds": 0.2
+    },
+    {
+      "id": "X02",
+      "category": "tiering",
+      "title": "Rendered production tiering policy validates and applies (tiering.apply / get / status)",
+      "expected": "policy accepted, archive bound to archive-hot-cold, 7,776,000 s rung",
+      "status": "PASS",
+      "evidence": {
+        "apply": "applied tiering config revision 2: 1 profile(s), 1 binding(s)",
+        "v1_schema_note": "v1.0 JSON ('pattern'/'class') is rejected: unknown field \"pattern\"; correct protojson is {'match': ['**'], 'volumeClass': ...}"
+      },
+      "seconds": 14.3
+    },
+    {
+      "id": "X03",
+      "category": "tiering",
+      "title": "Worker-driven demotion SSD(010) -> EC 10+4 on HDD with a 60s test rung",
+      "expected": "quiet volumes demoted by the volume_tiering worker; shards only on HDD nodes; all objects readable",
+      "status": "FINDING",
+      "evidence": {
+        "policy_propagation_s": 1,
+        "landing_probes": 1,
+        "landed": [
+          "ssd",
+          "archive-data"
+        ],
+        "encode_complete_s": 453.1,
+        "operator_finishing": {
+          "leftover_replicas_deleted": 6,
+          "status_before": [
+            "  tier:landing     6"
+          ]
+        },
+        "before": {
+          "ssd_replicated_volumes": 12,
+          "ssd_replicated_mb": 174.9,
+          "hdd_replicated_volumes": 0,
+          "hdd_replicated_mb": 0.0,
+          "ec_volumes": 0,
+          "ec_shards_on_hdd": 0,
+          "ec_shards_on_ssd": 0,
+          "ec_mb_on_hdd": 0.0,
+          "ec_mb_on_ssd": 0.0,
+          "files": 0
+        },
+        "after": {
+          "ssd_replicated_volumes": 0,
+          "ssd_replicated_mb": 0.0,
+          "hdd_replicated_volumes": 0,
+          "hdd_replicated_mb": 0.0,
+          "ec_volumes": 6,
+          "ec_shards_on_hdd": 84,
+          "ec_shards_on_ssd": 0,
+          "ec_mb_on_hdd": 168.0,
+          "ec_mb_on_ssd": 0.0,
+          "files": 0
+        },
+        "apply": "applied tiering config revision 3: 2 profile(s), 2 binding(s)",
+        "demotion_seconds_after_quiet": 660,
+        "ec_volumes": 6,
+        "shards_total": 84,
+        "shards_on_hot_nodes_pct": 0.0,
+        "worst_shards_on_one_node": 5,
+        "volumes_not_14_shards": [],
+        "unreadable": 0,
+        "last": {
+          "old_volumes": [
+            25,
+            26,
+            27,
+            28,
+            29,
+            30
+          ],
+          "ec": [
+            25,
+            26,
+            27,
+            28,
+            29,
+            30
+          ],
+          "still_on_ssd": []
+        },
+        "tiering_status_before": "  tier:landing     6",
+        "note": "EC placement correct, but the replicated source was not dropped automatically; operator finishing (volume.delete of the leftover replica after verifying 14 shards) was needed"
+      },
+      "seconds": 739.3
+    },
+    {
+      "id": "X04",
+      "category": "tiering",
+      "title": "Cold node loss with EC 10+4 on 3 cold nodes (Enterprise placement)",
+      "expected": "design expectation (v1.0): readable; arithmetic says 5 shards/node > 4 parity",
+      "status": "FINDING",
+      "evidence": {
+        "max_shards_per_node": {
+          "127.10.20.11:8081": 5,
+          "127.10.20.12:8081": 5,
+          "127.10.20.13:8081": 5
+        },
+        "unreadable_while_down": "96/300",
+        "unreadable_after_restart": 0
+      },
+      "seconds": 210.0
+    },
+    {
+      "id": "X05",
+      "category": "tiering",
+      "title": "Remediation: Enterprise custom EC 6+3 survives a cold node loss on 3 racks",
+      "expected": "max 3 shards per node <= 3 parity: 0 unreadable with one cold node down",
+      "status": "PASS",
+      "evidence": {
+        "demoted": true,
+        "operator_finishing_replicas_deleted": 10,
+        "ec_volumes": 8,
+        "worst_shards_on_one_node": 3,
+        "unreadable_with_cold01_down": "0/200"
+      },
+      "seconds": 267.2,
+      "note": "second pass on the same cluster (first pass: FAIL, harness issue fixed)",
+      "first_pass": {
+        "status": "FAIL",
+        "evidence": {
+          "demoted": true,
+          "operator_finishing_replicas_deleted": 0,
+          "ec_volumes": 0,
+          "worst_shards_on_one_node": 0,
+          "unreadable_with_cold01_down": "0/200"
+        }
+      }
+    },
+    {
+      "id": "X10",
+      "category": "data-movement",
+      "title": "Initial snapshot completeness on a pre-loaded primary (written via all 3 gateways)",
+      "expected": "policy reaches caught_up and listing+ETag diff Primary vs DR is 0 - no reconcile needed",
+      "status": "PASS",
+      "evidence": {
+        "phases": [
+          "unspecified",
+          "snapshot",
+          "tailing",
+          "caught_up"
+        ],
+        "seconds_to_caught_up": 30.1,
+        "filesMoved": 3411,
+        "bytesMoved_mb": 325.1,
+        "snapshotEntriesWalked": 2425,
+        "src_objects": 2420,
+        "missing_on_dr": 0,
+        "size_mismatch": 0
+      },
+      "seconds": 61.8
+    },
+    {
+      "id": "X11",
+      "category": "data-movement",
+      "title": "CONTINUOUS lag (PUT via all 3 gateways -> visible on DR)",
+      "expected": "lag well under RPO",
+      "status": "PASS",
+      "evidence": {
+        "p50_s": 0.21,
+        "p95_s": 0.32,
+        "max_s": 0.32,
+        "reported_lagSeconds": 0,
+        "phase": "caught_up"
+      },
+      "seconds": 7.2
+    },
+    {
+      "id": "X12",
+      "category": "data-movement",
+      "title": "Delete propagation (mirror)",
+      "expected": "delete on Primary removes the object on DR",
+      "status": "PASS",
+      "evidence": {
+        "propagation_s": 0.23
+      },
+      "seconds": 0.2
+    },
+    {
+      "id": "X13",
+      "category": "data-movement",
+      "title": "Primary filer-01 crash while writing (the v1/OSS gap scenario)",
+      "expected": "every acknowledged write reaches DR after recovery - no reconcile needed",
+      "status": "PASS",
+      "evidence": {
+        "acked": 262,
+        "missing_on_dr": 0,
+        "catch_up_s": 28.9,
+        "load": {
+          "max_stall_s": 15.5,
+          "ops": 524,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 8,
+          "put_max_ms": 15476
+        }
+      },
+      "seconds": 61.3
+    },
+    {
+      "id": "X14",
+      "category": "data-movement",
+      "title": "DR target filer crash (the filer the target points at)",
+      "expected": "replication pauses, resumes, no gaps",
+      "status": "PASS",
+      "evidence": {
+        "acked": 507,
+        "missing_on_dr": 0,
+        "catch_up_s": 1.5,
+        "load": {
+          "max_stall_s": 0.1,
+          "ops": 1014,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 8,
+          "put_max_ms": 34
+        }
+      },
+      "seconds": 34.0
+    },
+    {
+      "id": "X15",
+      "category": "data-movement",
+      "title": "All Data Movement workers crash for 20 s",
+      "expected": "leases expire, a restarted worker resumes from the checkpoint, no gaps",
+      "status": "FINDING",
+      "evidence": {
+        "acked": 494,
+        "missing_on_dr": 494,
+        "catch_up_s": 243.6,
+        "load": {
+          "max_stall_s": 0.1,
+          "ops": 988,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 8,
+          "put_max_ms": 29
+        },
+        "dm_jobs": [
+          {
+            "job": "eduled-1791384215232534358-0",
+            "state": "job_state_running",
+            "worker": "w-vm-6831",
+            "updated": "2026-10-07T14:47:15.242688504Z"
+          },
+          {
+            "job": "eduled-1791383711084211865-0",
+            "state": "job_state_running",
+            "worker": "w-vm-91e0",
+            "updated": "2026-10-07T14:41:41.095928768Z"
+          },
+          {
+            "job": "eduled-1791383622818252434-0",
+            "state": "job_state_succeeded",
+            "worker": "w-vm-0e50",
+            "updated": "2026-10-07T14:35:11.074948257Z"
+          }
+        ],
+        "status_phase": "caught_up",
+        "status_worker": "w-vm-0e50",
+        "status_age_s": 775,
+        "note": "workers killed mid-job: the data_movement job stays 'running' on the dead worker (execution timeout 86400 s), replication stops, status keeps the last good phase"
+      },
+      "seconds": 282.0
+    },
+    {
+      "id": "X16",
+      "category": "data-movement",
+      "title": "BACKUP mode keeps objects deleted on Primary",
+      "expected": "backup copy retains a deleted object (deletes OFF)",
+      "status": "FAIL",
+      "evidence": {
+        "copied_s": 300.2,
+        "present_after_primary_delete": false,
+        "phase": "unspecified"
+      },
+      "seconds": 323.7,
+      "note": "second pass on the same cluster (first pass: FAIL, harness issue fixed)",
+      "first_pass": {
+        "status": "FAIL",
+        "evidence": {
+          "copied_s": 300.2,
+          "present_after_primary_delete": false,
+          "phase": "unspecified"
+        }
+      }
+    },
+    {
+      "id": "X17",
+      "category": "data-movement",
+      "title": "Where does replicated data land on DR?",
+      "expected": "(design note) DR landing tier",
+      "status": "FINDING",
+      "evidence": {
+        "dr_ssd_volumes": 6,
+        "dr_hdd_volumes": 6,
+        "note": "seed lands on DR SSD as new data; size DR SSD or use a short-quiet DR profile during seeding"
+      },
+      "seconds": 0.0
+    },
+    {
+      "id": "X20",
+      "category": "failover",
+      "title": "Unplanned Primary DC loss under load: RPO with Data Movement",
+      "expected": "acknowledged writes missing on DR <= RPO window",
+      "status": "PASS",
+      "evidence": {
+        "acked_puts": 413,
+        "missing_on_dr": 2,
+        "rpo_observed_s": 0.07
+      },
+      "seconds": 30.0,
+      "note": "second pass on the same cluster (first pass: PASS, harness issue fixed)",
+      "first_pass": {
+        "status": "PASS",
+        "evidence": {
+          "acked_puts": 439,
+          "missing_on_dr": 6,
+          "rpo_observed_s": 0.18
+        }
+      }
+    },
+    {
+      "id": "X21",
+      "category": "failover",
+      "title": "Activate DR: LIST/GET/PUT with application credentials",
+      "expected": "all succeed",
+      "status": "PASS",
+      "evidence": {
+        "list": 10,
+        "dr_writes": 50,
+        "rto_s": 21.8
+      },
+      "seconds": 6.9,
+      "note": "second pass on the same cluster (first pass: PASS, harness issue fixed)",
+      "first_pass": {
+        "status": "PASS",
+        "evidence": {
+          "list": 10,
+          "dr_writes": 50,
+          "rto_s": 22.4
+        }
+      }
+    },
+    {
+      "id": "X22",
+      "category": "failover",
+      "title": "Failback with a MIGRATE policy DR -> Primary (drain fence)",
+      "expected": "DR-era writes on Primary; policy reports a cut-over-ready phase; forward replication re-established",
+      "status": "FAIL",
+      "evidence": {
+        "migrate_phases": [
+          "unspecified",
+          "tailing",
+          "caught_up",
+          "unspecified",
+          "caught_up",
+          "unspecified",
+          "caught_up",
+          "unspecified",
+          "caught_up"
+        ],
+        "seconds": 602.1,
+        "dr_writes_on_primary": "13/50",
+        "forward_resumed_s": null,
+        "last_status": {
+          "phase": "caught_up",
+          "lagSeconds": 0,
+          "postFenceEvents": 0,
+          "lastError": ""
+        }
+      },
+      "seconds": 809.9,
+      "note": "second pass on the same cluster (first pass: FAIL, harness issue fixed)",
+      "first_pass": {
+        "status": "FAIL",
+        "evidence": "exception: <urlopen error [Errno 111] Connection refused>\nTraceback (most recent call last):\n  File \"/usr/lib/python3.11/urllib/request.py\", line 1348, in do_open\n    h.request(req.get_method(), req.selector, req.data, headers,\n  File \"/usr/lib/python3.11/http/client.py\", line 1323, in request\n    self._send_request(method, url, body, headers, encode_chunked)\n  File \"/usr/lib/python3.11/http/client.py\", line 1369, in _send_request\n    self.endheaders(body, encode_chunked=encode_chunked)\nConnectionRefusedError: [Errno 111] Connection refused\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/home/claude/seaweedfs-deploy/tests/e2e_test.py\", line 88, in run\n    status, evidence = fn()\n                       ^^^^\n  File \"/home/claude/seaweedfs-deploy/tests/e2e_enterprise.py\", line 615, in _\n    wait(admin_up, 120, 3)\n  File \"/home/claude/seaweedfs-deploy/bin/seaweed_admin_api.py\", line 113, in put_policy\n    {\"token\": self._token(\"policies\", policy[\"name\"]), \"policy\": policy})\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nurllib.error.URLError: <urlopen error [Errno 111] Connection refused>\n"
+      }
+    },
+    {
+      "id": "X23",
+      "category": "failover",
+      "title": "Post-failback consistency Primary vs DR",
+      "expected": "only the RPO-window writes differ",
+      "status": "FAIL",
+      "evidence": {
+        "src_objects": 4167,
+        "dst_objects": 4203,
+        "missing_on_dst": 1,
+        "extra_on_dst": 37,
+        "size_mismatch": 0,
+        "rpo_window_objects": 2
+      },
+      "seconds": 19.1,
+      "note": "second pass on the same cluster (first pass: FAIL, harness issue fixed)",
+      "first_pass": {
+        "status": "FAIL",
+        "evidence": {
+          "src_objects": 3657,
+          "dst_objects": 3701,
+          "missing_on_dst": 6,
+          "extra_on_dst": 50,
+          "size_mismatch": 0,
+          "rpo_window_objects": 6
+        }
+      }
+    }
+  ],
+  "tiering_before_after": {
+    "before": {
+      "ssd_replicated_volumes": 12,
+      "ssd_replicated_mb": 174.9,
+      "hdd_replicated_volumes": 0,
+      "hdd_replicated_mb": 0.0,
+      "ec_volumes": 0,
+      "ec_shards_on_hdd": 0,
+      "ec_shards_on_ssd": 0,
+      "ec_mb_on_hdd": 0.0,
+      "ec_mb_on_ssd": 0.0,
+      "files": 0
+    },
+    "after": {
+      "ssd_replicated_volumes": 0,
+      "ssd_replicated_mb": 0.0,
+      "hdd_replicated_volumes": 0,
+      "hdd_replicated_mb": 0.0,
+      "ec_volumes": 6,
+      "ec_shards_on_hdd": 84,
+      "ec_shards_on_ssd": 0,
+      "ec_mb_on_hdd": 168.0,
+      "ec_mb_on_ssd": 0.0,
+      "files": 0
+    },
+    "policy_propagation_s": 1
+  },
+  "replication": {
+    "seed": {
+      "objects": 2420,
+      "seconds": 30.1,
+      "bytesMoved": 340889872,
+      "filesMoved": 3411
+    }
+  },
+  "passes": {
+    "main": {
+      "PASS": 9,
+      "FAIL": 4,
+      "FINDING": 4,
+      "SKIP": 0
+    },
+    "second": {
+      "PASS": 3,
+      "FAIL": 3,
+      "FINDING": 0,
+      "SKIP": 0
+    }
+  },
+  "x15_recovery": {
+    "test": "X15 follow-up",
+    "action": "stop+start primary admin and both workers",
+    "canary_replicated_after_s": 386.7,
+    "writes_during_stall": 494,
+    "still_missing_after_recovery": 288,
+    "note": "the resumed data_movement job did not replay 288 of the 494 writes made while replication was stalled; only s3-reconcile closes the gap"
+  }
+}

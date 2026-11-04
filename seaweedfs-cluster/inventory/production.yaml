@@ -1,0 +1,201 @@
+# =============================================================================
+# SeaweedFS Enterprise - Production inventory (Primary DC1 + DR DC2)
+# Single source of truth for swctl: validate -> render -> deploy -> verify.
+# Replace placeholder IPs / hostnames with the real node inventory.
+# =============================================================================
+global:
+  edition: enterprise            # enterprise | oss  (oss skips tiering/data-movement)
+  weed_binary: /opt/seaweedfs/weed
+  weed_version: "4.47"           # pin; upgrade deliberately (see runbook)
+  license_file: /etc/seaweedfs/seaweed-license.json
+  config_dir: /etc/seaweedfs
+  data_root: /data/seaweed       # master mdir, filer store, admin, worker state
+  run_user: seaweedfs
+  transport: ssh                 # ssh | local
+  runtime: systemd               # systemd | local
+  ssh:
+    user: deploy
+    options: "-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
+    sudo: true
+
+  # --- Port plan (fixes v1.0 collisions: metrics must NOT equal port+10000) --
+  ports:
+    master:      {http: 9333,  metrics: 9324}      # gRPC = 19333
+    volume_hot:  {http: 8080,  metrics: 9325}      # gRPC = 18080
+    volume_cold: {http: 8081,  metrics: 9326}      # gRPC = 18081
+    filer:       {http: 8888,  metrics: 9327}      # gRPC = 18888
+    s3:          {http: 8333,  metrics: 9328}      # gRPC = 18333
+    admin:       {http: 23646, metrics: 9329}      # gRPC = 33646
+    worker:      {metrics_base: 9330}              # worker N -> 9330+N-1
+
+  master:
+    volume_size_limit_mb: 30000
+    default_replication: "010"
+    raft_hashicorp: false
+  volume:
+    index: leveldb               # memory|leveldb ; leveldb bounds RAM for many small files
+    min_free_space: "5"          # percent; volumes go read-only below this
+    compaction_mbps: 50
+    volume_size_gb: 30           # must match master.volume_size_limit_mb / 1000
+  filer:
+    store: leveldb2              # leveldb2 (per-filer, peer-synced) | postgres2 | redis3 ...
+    # postgres2: {hostname: pg-vip, port: 5432, database: seaweedfs, username: seaweedfs, password_env: SW_PG_PASSWORD}
+  s3:
+    buckets: [archive]
+    identities:
+      - name: archive-app
+        access_key: archive_app
+        secret_env: SW_S3_ARCHIVE_APP_SECRET   # never commit secrets; injected from vault/env
+        actions: ["Read:archive", "Write:archive", "List:archive", "Tagging:archive"]
+      - name: monitor
+        access_key: monitor_probe
+        secret_env: SW_S3_MONITOR_SECRET
+        actions: ["Read:archive", "List:archive"]
+      - name: admin
+        access_key: sw_admin
+        secret_env: SW_S3_ADMIN_SECRET
+        actions: ["Admin"]
+  security:
+    grpc_mtls: true              # per-node certs signed by a SeaweedFS-internal CA
+    jwt_signing: true            # volume write authorization
+    https: false                 # TLS terminated on F5; enable for end-to-end TLS
+    pki_dir: pki                 # relative to build dir; use your enterprise CA in prod
+  tiering:
+    hot_disk: ssd
+    cold_disk: hdd
+    quiet_for_seconds: 7776000   # 90 days
+    ec: {data_shards: 10, parity_shards: 4}
+    ssd_pressure: {high_watermark: 0.80, low_watermark: 0.70}
+  workers: {count: 2, job_types: "all"}
+
+clusters:
+  # ---------------------------------------------------------------------------
+  primary:
+    role: active
+    datacenter: dc1
+    s3_vip: s3-primary.company.com
+    admin: {host: primary-admin, ip: 10.10.6.11}
+    racks: [r1, r2, r3]
+    nodes:
+      - {host: primary-master-01, ip: 10.10.1.11, rack: r1, roles: [master]}
+      - {host: primary-master-02, ip: 10.10.1.12, rack: r2, roles: [master]}
+      - {host: primary-master-03, ip: 10.10.1.13, rack: r3, roles: [master]}
+      - {host: primary-filer-01,  ip: 10.10.4.11, rack: r1, roles: [filer]}
+      - {host: primary-filer-02,  ip: 10.10.4.12, rack: r2, roles: [filer]}
+      - {host: primary-filer-03,  ip: 10.10.4.13, rack: r3, roles: [filer]}
+      - {host: primary-s3-01,     ip: 10.10.5.11, rack: r1, roles: [s3]}
+      - {host: primary-s3-02,     ip: 10.10.5.12, rack: r2, roles: [s3]}
+      - {host: primary-s3-03,     ip: 10.10.5.13, rack: r3, roles: [s3]}
+      - host: primary-hot-01
+        ip: 10.10.10.11
+        rack: r1
+        roles: [volume_hot]
+        disks: [{path: /data/nvme1, type: ssd, size_gb: 3840}]
+      - host: primary-hot-02
+        ip: 10.10.10.12
+        rack: r2
+        roles: [volume_hot]
+        disks: [{path: /data/nvme1, type: ssd, size_gb: 3840}]
+      - host: primary-hot-03
+        ip: 10.10.10.13
+        rack: r3
+        roles: [volume_hot]
+        disks: [{path: /data/nvme1, type: ssd, size_gb: 3840}]
+      - host: primary-cold-01
+        ip: 10.10.20.11
+        rack: r1
+        roles: [volume_cold]
+        disks:
+          - {path: /data/hdd1, type: hdd, size_gb: 16000}
+          - {path: /data/hdd2, type: hdd, size_gb: 16000}
+          - {path: /data/hdd3, type: hdd, size_gb: 16000}
+      - host: primary-cold-02
+        ip: 10.10.20.12
+        rack: r2
+        roles: [volume_cold]
+        disks:
+          - {path: /data/hdd1, type: hdd, size_gb: 16000}
+          - {path: /data/hdd2, type: hdd, size_gb: 16000}
+          - {path: /data/hdd3, type: hdd, size_gb: 16000}
+      - host: primary-cold-03
+        ip: 10.10.20.13
+        rack: r3
+        roles: [volume_cold]
+        disks:
+          - {path: /data/hdd1, type: hdd, size_gb: 16000}
+          - {path: /data/hdd2, type: hdd, size_gb: 16000}
+          - {path: /data/hdd3, type: hdd, size_gb: 16000}
+      - {host: primary-admin,     ip: 10.10.6.11, rack: r1, roles: [admin, worker]}
+  # ---------------------------------------------------------------------------
+  dr:
+    role: standby
+    datacenter: dc2
+    s3_vip: s3-dr.company.com
+    admin: {host: dr-admin, ip: 10.20.6.11}
+    racks: [r1, r2, r3]
+    replicate_from: primary      # data movement source cluster
+    replication_paths: [/buckets/archive]
+    data_movement:               # Enterprise: configured on the SOURCE (primary) Admin by `swctl dm apply`
+      target: primary-to-dr
+      policies:
+        - {name: archive-primary-to-dr, source: /buckets/archive, dest: /buckets/archive,
+           mode: continuous, propagate_deletes: true, initial_snapshot: true, bytes_per_second: 0}
+      backup:                    # separate retention copy, deletes OFF (point at an immutable target in prod)
+        - {name: archive-backup, target: dr-backup, source: /buckets/archive,
+           dest: /buckets/archive-backup, mode: backup, propagate_deletes: false, initial_snapshot: true}
+    nodes:
+      - {host: dr-master-01, ip: 10.20.1.11, rack: r1, roles: [master]}
+      - {host: dr-master-02, ip: 10.20.1.12, rack: r2, roles: [master]}
+      - {host: dr-master-03, ip: 10.20.1.13, rack: r3, roles: [master]}
+      - {host: dr-filer-01,  ip: 10.20.4.11, rack: r1, roles: [filer]}
+      - {host: dr-filer-02,  ip: 10.20.4.12, rack: r2, roles: [filer]}
+      - {host: dr-filer-03,  ip: 10.20.4.13, rack: r3, roles: [filer]}
+      - {host: dr-s3-01,     ip: 10.20.5.11, rack: r1, roles: [s3]}
+      - {host: dr-s3-02,     ip: 10.20.5.12, rack: r2, roles: [s3]}
+      - {host: dr-s3-03,     ip: 10.20.5.13, rack: r3, roles: [s3]}
+      - host: dr-hot-01
+        ip: 10.20.10.11
+        rack: r1
+        roles: [volume_hot]
+        disks: [{path: /data/nvme1, type: ssd, size_gb: 3840}]
+      - host: dr-hot-02
+        ip: 10.20.10.12
+        rack: r2
+        roles: [volume_hot]
+        disks: [{path: /data/nvme1, type: ssd, size_gb: 3840}]
+      - host: dr-hot-03
+        ip: 10.20.10.13
+        rack: r3
+        roles: [volume_hot]
+        disks: [{path: /data/nvme1, type: ssd, size_gb: 3840}]
+      - host: dr-cold-01
+        ip: 10.20.20.11
+        rack: r1
+        roles: [volume_cold]
+        disks:
+          - {path: /data/hdd1, type: hdd, size_gb: 16000}
+          - {path: /data/hdd2, type: hdd, size_gb: 16000}
+          - {path: /data/hdd3, type: hdd, size_gb: 16000}
+      - host: dr-cold-02
+        ip: 10.20.20.12
+        rack: r2
+        roles: [volume_cold]
+        disks:
+          - {path: /data/hdd1, type: hdd, size_gb: 16000}
+          - {path: /data/hdd2, type: hdd, size_gb: 16000}
+          - {path: /data/hdd3, type: hdd, size_gb: 16000}
+      - host: dr-cold-03
+        ip: 10.20.20.13
+        rack: r3
+        roles: [volume_cold]
+        disks:
+          - {path: /data/hdd1, type: hdd, size_gb: 16000}
+          - {path: /data/hdd2, type: hdd, size_gb: 16000}
+          - {path: /data/hdd3, type: hdd, size_gb: 16000}
+      - {host: dr-admin,     ip: 10.20.6.11, rack: r1, roles: [admin, worker]}
+
+# Expected business inputs (validator warns while these are unset)
+sla:
+  rpo_seconds: null              # must be approved by the business
+  rto_minutes: null
+  daily_ingest_gb: null          # drives SSD sizing check (90d x ingest x replicas)

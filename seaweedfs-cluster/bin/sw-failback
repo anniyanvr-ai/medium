@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""
+sw-failback - controlled failback after a DR activation, without the gaps found in the lab (E-09:
+a MIGRATE replay started from the failover timestamp with snapshot OFF moved 13 of 50 DR-era writes).
+
+The design: a DR -> Primary policy WITH initial snapshot (walks the whole bucket, so nothing depends
+on a timestamp), deletes OFF, then an S3 reconcile loop as the convergence proof, then a gated
+cutover that never lets the two directions run at the same time.
+
+  sw-failback -i inv plan                    # what will happen, preconditions
+  sw-failback -i inv start                   # disable forward policy, create + start DR->Primary policy
+  sw-failback -i inv verify [--since T]      # canary DR->Primary + reconcile loop until 0 missing
+  sw-failback -i inv cutover --confirm       # after GSLB moved writes back to the Primary:
+                                             #   final reconcile, disable DR->Primary, reconcile the
+                                             #   Primary-only RPO objects to DR, re-enable forward policy
+  sw-failback -i inv status
+
+Credentials: admin passwords via SW_ADMIN_PASSWORD_<CLUSTER>; S3 via SRC_/DST_/AWS_* like s3-reconcile
+(the identity must read and write the bucket on both sites).
+"""
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+_l = importlib.machinery.SourceFileLoader("swctl", str(HERE / "swctl"))
+_s = importlib.util.spec_from_loader("swctl", _l)
+sw = importlib.util.module_from_spec(_s)
+sys.modules["swctl"] = sw
+_l.exec_module(sw)
+
+
+def pair(inv):
+    for dst, cl in inv.clusters.items():
+        if cl.get("data_movement"):
+            return cl["replicate_from"], dst, cl["data_movement"]
+    raise SystemExit("inventory has no data_movement section")
+
+
+def s3(inv, c):
+    return f"{'https' if inv.g.get('s3', {}).get('https') else 'http'}://{inv.s3s(c)[0]}"
+
+
+def reconcile(src, dst, bucket, since=None, copy=True, workers=32):
+    cmd = [str(HERE / "s3-reconcile"), "--src", src, "--dst", dst, "--bucket", bucket, "--workers", str(workers)]
+    if since:
+        cmd += ["--since", str(int(since))]
+    if copy:
+        cmd.append("--copy-missing")
+    out = subprocess.run(cmd, capture_output=True, text=True).stdout
+    try:
+        return json.loads(out[out.index("{"):])
+    except Exception:  # noqa: BLE001
+        return {"error": out[-300:]}
+
+
+def canary(src, dst, bucket, timeout=120):
+    r = subprocess.run([str(HERE / "sw-canary"), "--src", src, "--dst", dst, "--bucket", bucket,
+                        "--timeout", str(timeout)], capture_output=True, text=True)
+    return r.returncode == 0, r.stdout.strip()
+
+
+def set_enabled(api, name, enabled):
+    for p in api.dm_config().get("policies", []) or []:
+        if p.get("name") == name:
+            pol = {k: v for k, v in p.items() if k != "token"}
+            pol["enabled"] = enabled
+            code, r = api.put_policy(pol)
+            return code
+    return 404
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("-i", "--inventory", required=True)
+    ap.add_argument("action", choices=["plan", "start", "verify", "cutover", "status"])
+    ap.add_argument("--since", type=float, help="failover time (epoch) - only narrows the reconcile listing")
+    ap.add_argument("--rounds", type=int, default=5)
+    ap.add_argument("--confirm", action="store_true")
+    a = ap.parse_args()
+    inv = sw.Inventory(a.inventory)
+    prim, dr, dmc = pair(inv)
+    fwd = dmc["policies"][0]
+    bucket = fwd["source"].rstrip("/").split("/")[-1]
+    back_target, back_policy = f"{dr}-to-{prim}", f"failback-{dr}-to-{prim}"
+    sp, sd = s3(inv, prim), s3(inv, dr)
+
+    if a.action == "plan":
+        print(f"""failback plan  {dr} (authoritative) -> {prim}
+ 1 start   : disable '{fwd['name']}' on {prim} admin; on {dr} admin create target '{back_target}'
+             and CONTINUOUS policy '{back_policy}' {fwd['source']} -> {fwd['dest']},
+             initial snapshot ON, deletes OFF
+ 2 verify  : canary {dr}->{prim}; s3-reconcile {dr}->{prim} --copy-missing until 0 missing ({a.rounds} rounds max)
+ 3 cutover : (after GSLB points writers at {prim}) final reconcile, disable '{back_policy}',
+             s3-reconcile {prim}->{dr} for the Primary-only RPO objects, re-enable '{fwd['name']}',
+             canary {prim}->{dr}
+ never     : run both directions at once, or enable deletes before the reconcile reports 0 missing""")
+        return 0
+
+    api_p, api_d = sw._admin_api(inv, prim), sw._admin_api(inv, dr)     # plan works offline
+    if a.action == "status":
+        for c, api in ((prim, api_p), (dr, api_d)):
+            for st in api.dm_status().get("statuses", []) or []:
+                print(f"  {c:8} {st.get('policy'):30} {st.get('phase'):10} files={st.get('filesMoved')} "
+                      f"err={st.get('lastError') or '-'}")
+        return 0
+
+    if a.action == "start":
+        sw.log(f"{prim}: disable forward policy {fwd['name']} -> HTTP {set_enabled(api_p, fwd['name'], False)}")
+        code, r = api_d.put_target(sw.dm_target(inv, dr, prim, back_target))
+        sw.log(f"{dr}: target {back_target} -> HTTP {code} {r.get('error', '')}", "ok" if code == 200 else "fail")
+        pol = sw.dm_policy({"name": back_policy, "source": fwd["dest"], "dest": fwd["source"], "mode": "continuous",
+                            "propagate_deletes": False, "initial_snapshot": True}, back_target)
+        code, r = api_d.put_policy(pol)
+        sw.log(f"{dr}: policy {back_policy} (snapshot ON, deletes OFF) -> HTTP {code} {r.get('error', '')}",
+               "ok" if code == 200 else "fail")
+        for jt in ("data_movement",):
+            api_d.enable_job(jt, detection_interval_minutes=1)
+        api_d.detect("data_movement")
+        # E-10: a new policy may sit unscheduled behind a stale job - wait, then expire stale jobs (sec. 11.3)
+        sched = lambda: (any(s.get("policy") == back_policy and s.get("phase") not in (None, "", "unspecified")  # noqa: E731
+                             for s in api_d.dm_status().get("statuses", []) or []), None)
+        ok, dt_, last = sw.wait_until(sched, 120, 10)
+        if not ok:
+            j = api_d.jobs(1000)
+            for job in (j.get("jobs", j) if isinstance(j, dict) else j) or []:
+                if job.get("job_type") == "data_movement" and job.get("state") in ("job_state_running", "job_state_pending"):
+                    code, _ = api_d.expire_job(job["job_id"], "sw-failback: release stale job (E-10)")
+                    sw.log(f"{dr}: expired stale job {job['job_id']} -> HTTP {code}", "warn")
+            api_d.detect("data_movement")
+            ok, dt2, last = sw.wait_until(sched, 480, 10)
+            dt_ += dt2
+        sw.log(f"{back_policy} scheduled after {dt_:.0f}s" if ok else
+               f"{back_policy} not scheduled after 600s - run sw-guard --check dm --fix on {dr}",
+               "ok" if ok else "warn")
+        return 0 if code == 200 else 1
+
+    if a.action == "verify":
+        ok, msg = canary(sd, sp, bucket)
+        sw.log(f"canary {dr}->{prim}: {msg}", "ok" if ok else "warn")
+        for i in range(a.rounds):
+            r = reconcile(sd, sp, bucket, a.since)
+            sw.log(f"round {i + 1}: {dr} objects={r.get('src_objects')} missing on {prim}={r.get('missing_on_dst')} "
+                   f"copied={r.get('copied')} failures={r.get('copy_failures')}")
+            if r.get("missing_on_dst") == 0 and r.get("size_mismatch") == 0:
+                sw.log(f"{prim} contains every {dr} object - ready for cutover", "ok")
+                return 0
+            time.sleep(10)
+        return 2
+
+    if a.action == "cutover":
+        if not a.confirm:
+            raise SystemExit("cutover requires --confirm (writers must already be pointed at the Primary)")
+        r = reconcile(sd, sp, bucket, a.since)
+        sw.log(f"final {dr}->{prim} reconcile: missing={r.get('missing_on_dst')} copied={r.get('copied')}")
+        sw.log(f"{dr}: disable {back_policy} -> HTTP {set_enabled(api_d, back_policy, False)}")
+        r = reconcile(sp, sd, bucket)
+        sw.log(f"{prim}->{dr} reconcile (RPO-window objects): missing={r.get('missing_on_dst')} copied={r.get('copied')}")
+        sw.log(f"{prim}: re-enable {fwd['name']} -> HTTP {set_enabled(api_p, fwd['name'], True)}")
+        api_p.detect("data_movement")
+        ok, dt_, _ = sw.wait_until(lambda: (canary(sp, sd, bucket, 30)[0], None), 900, 15)
+        sw.log(f"forward replication {'resumed after %.0fs' % dt_ if ok else 'NOT resumed - run sw-guard --fix'}",
+               "ok" if ok else "fail")
+        return 0 if ok else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

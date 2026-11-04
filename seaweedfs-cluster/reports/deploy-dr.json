@@ -1,0 +1,50 @@
+[
+  {
+    "cluster": "dr",
+    "phase": "master",
+    "services": 3,
+    "ok": true,
+    "seconds": 2.0,
+    "detail": "leaders={'127.20.1.11:9333.19333'}"
+  },
+  {
+    "cluster": "dr",
+    "phase": "volume",
+    "services": 6,
+    "ok": true,
+    "seconds": 1.0,
+    "detail": "6 volume servers"
+  },
+  {
+    "cluster": "dr",
+    "phase": "filer",
+    "services": 3,
+    "ok": true,
+    "seconds": 3.0,
+    "detail": "3 healthy"
+  },
+  {
+    "cluster": "dr",
+    "phase": "s3",
+    "services": 3,
+    "ok": true,
+    "seconds": 1.0,
+    "detail": "3 healthy"
+  },
+  {
+    "cluster": "dr",
+    "phase": "admin",
+    "services": 1,
+    "ok": true,
+    "seconds": 0.0,
+    "detail": "running"
+  },
+  {
+    "cluster": "dr",
+    "phase": "worker",
+    "services": 1,
+    "ok": true,
+    "seconds": 0.0,
+    "detail": "running"
+  }
+]

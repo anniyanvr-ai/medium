@@ -1,0 +1,744 @@
+{
+  "inventory": "/home/claude/seaweedfs-deploy/inventory/lab.yaml",
+  "edition": "oss",
+  "weed_version": "version 8000GB 4.47 pypi linux amd64",
+  "started": "2026-09-29 17:34:57",
+  "minutes": 14.2,
+  "summary": {
+    "PASS": 26,
+    "FAIL": 0,
+    "FINDING": 11,
+    "SKIP": 1
+  },
+  "results": [
+    {
+      "id": "A01",
+      "category": "process",
+      "title": "Inventory validation catches design defects before deploy",
+      "expected": "validator runs; FAIL items are real design defects to fix",
+      "status": "FINDING",
+      "evidence": {
+        "fail": [
+          "ec-node-loss: [primary] EC 10+4 on 3 cold nodes puts up to 5 shards on one node > 4 parity: losing ONE cold node makes EC data unreadable. Need >= 4 cold nodes, or a narrower code (e.g. 6+3 / 4+2)",
+          "ec-rack-loss: [primary] EC 10+4 across 3 racks = 5 shards/rack > 4 parity: a rack failure makes EC data unreadable. Need >= 4 racks or a narrower code",
+          "ec-node-loss: [dr] EC 10+4 on 3 cold nodes puts up to 5 shards on one node > 4 parity: losing ONE cold node makes EC data unreadable. Need >= 4 cold nodes, or a narrower code (e.g. 6+3 / 4+2)",
+          "ec-rack-loss: [dr] EC 10+4 across 3 racks = 5 shards/rack > 4 parity: a rack failure makes EC data unreadable. Need >= 4 racks or a narrower code"
+        ],
+        "counts": {
+          "PASS": 12,
+          "WARN": 9,
+          "FAIL": 4
+        }
+      },
+      "seconds": 0.0
+    },
+    {
+      "id": "A02",
+      "category": "process",
+      "title": "v1.0 port plan reproduced on real binary (metricsPort = port+10000)",
+      "expected": "v1.0 document flags start cleanly",
+      "status": "FINDING",
+      "evidence": {
+        "master -metricsPort=19333": "exited rc=255; F0929 17:50:58.911950 master.go:265 master failed to listen on grpc port 19333: listen tcp 127.99.0.1:19333: bind: address already in use",
+        "volume -metricsPort=18080": "exited rc=255; F0929 17:51:02.888240 volume.go:577 failed to listen on grpc port 18080: listen tcp 127.99.0.1:18080: bind: address already in use",
+        "s3 -metricsPort=18333": "still running; no bind error logged"
+      },
+      "seconds": 16.0,
+      "note": "re-run after harness fix (see reports/e2e-rerun-A02-B02.json)"
+    },
+    {
+      "id": "A03",
+      "category": "process",
+      "title": "Phased deploy with health gates (primary + DR)",
+      "expected": "every phase gate passes; total deploy time recorded",
+      "status": "PASS",
+      "evidence": [
+        {
+          "cluster": "primary",
+          "phase": "master",
+          "services": 3,
+          "ok": true,
+          "seconds": 2.0,
+          "detail": "leaders={'127.10.1.11:9333.19333'}"
+        },
+        {
+          "cluster": "primary",
+          "phase": "volume",
+          "services": 6,
+          "ok": true,
+          "seconds": 1.0,
+          "detail": "6 volume servers"
+        },
+        {
+          "cluster": "primary",
+          "phase": "filer",
+          "services": 3,
+          "ok": true,
+          "seconds": 3.0,
+          "detail": "3 healthy"
+        },
+        {
+          "cluster": "primary",
+          "phase": "s3",
+          "services": 3,
+          "ok": true,
+          "seconds": 1.0,
+          "detail": "3 healthy"
+        },
+        {
+          "cluster": "primary",
+          "phase": "admin",
+          "services": 1,
+          "ok": true,
+          "seconds": 0.0,
+          "detail": "running"
+        },
+        {
+          "cluster": "primary",
+          "phase": "worker",
+          "services": 1,
+          "ok": true,
+          "seconds": 0.0,
+          "detail": "running"
+        },
+        {
+          "cluster": "dr",
+          "phase": "master",
+          "services": 3,
+          "ok": true,
+          "seconds": 2.0,
+          "detail": "leaders={'127.20.1.11:9333.19333'}"
+        },
+        {
+          "cluster": "dr",
+          "phase": "volume",
+          "services": 6,
+          "ok": true,
+          "seconds": 1.0,
+          "detail": "6 volume servers"
+        },
+        {
+          "cluster": "dr",
+          "phase": "filer",
+          "services": 3,
+          "ok": true,
+          "seconds": 3.0,
+          "detail": "3 healthy"
+        },
+        {
+          "cluster": "dr",
+          "phase": "s3",
+          "services": 3,
+          "ok": true,
+          "seconds": 1.0,
+          "detail": "3 healthy"
+        },
+        {
+          "cluster": "dr",
+          "phase": "admin",
+          "services": 1,
+          "ok": true,
+          "seconds": 0.0,
+          "detail": "running"
+        },
+        {
+          "cluster": "dr",
+          "phase": "worker",
+          "services": 1,
+          "ok": true,
+          "seconds": 0.0,
+          "detail": "running"
+        }
+      ],
+      "seconds": 0.0
+    },
+    {
+      "id": "A04",
+      "category": "process",
+      "title": "Deploy is idempotent (re-run on a running cluster)",
+      "expected": "no restarts, all gates pass again",
+      "status": "PASS",
+      "evidence": {
+        "rc": 0,
+        "restarted": []
+      },
+      "seconds": 0.1
+    },
+    {
+      "id": "A05",
+      "category": "process",
+      "title": "Every Prometheus target answers (port plan works end-to-end)",
+      "expected": "all metrics endpoints return SeaweedFS_* series",
+      "status": "PASS",
+      "evidence": {
+        "targets": 34,
+        "bad": []
+      },
+      "seconds": 0.1
+    },
+    {
+      "id": "B01",
+      "category": "topology",
+      "title": "Master Raft quorum: 3 members, 1 leader (each cluster)",
+      "expected": "1 leader, 2 followers",
+      "status": "PASS",
+      "evidence": {
+        "primary": "leaders={'127.10.1.11:9333.19333'}",
+        "dr": "leaders={'127.20.1.11:9333.19333'}"
+      },
+      "seconds": 0.0
+    },
+    {
+      "id": "B02",
+      "category": "topology",
+      "title": "Volume servers registered with correct DC / rack (+ disk type)",
+      "expected": "each DC: 6 servers, one hot + one cold per rack; disk type confirmed by volume placement (C04/F02)",
+      "status": "PASS",
+      "evidence": {
+        "primary": {
+          "registered": 6,
+          "mismatch": []
+        },
+        "dr": {
+          "registered": 6,
+          "mismatch": []
+        }
+      },
+      "seconds": 0.0,
+      "note": "re-run after harness fix (see reports/e2e-rerun-A02-B02.json)"
+    },
+    {
+      "id": "B03",
+      "category": "topology",
+      "title": "DR is an independent cluster (no shared quorum)",
+      "expected": "disjoint master sets & leaders",
+      "status": "PASS",
+      "evidence": {
+        "primary": "127.10.1.11:9333",
+        "dr": "127.20.1.11:9333"
+      },
+      "seconds": 0.0
+    },
+    {
+      "id": "C01",
+      "category": "functional",
+      "title": "S3 PUT/GET/HEAD/LIST/DELETE integrity (500 objects, 1 KB-2 MB)",
+      "expected": "all objects round-trip with matching MD5",
+      "status": "PASS",
+      "evidence": {
+        "objects": 500,
+        "bad": [],
+        "listed": 500,
+        "delete_ok": true,
+        "put_seconds": 6.0
+      },
+      "seconds": 8.0
+    },
+    {
+      "id": "C02",
+      "category": "functional",
+      "title": "Multipart upload 64 MB (large XML/EDI batch)",
+      "expected": "ETag multipart, MD5 matches",
+      "status": "PASS",
+      "evidence": {
+        "etag": "\"e5d3a9a656e2fe8d75d39a99c22e2bb0-8\"",
+        "size": 67108864
+      },
+      "seconds": 1.7
+    },
+    {
+      "id": "C03",
+      "category": "functional",
+      "title": "Read-your-write across gateways (different filers)",
+      "expected": "object written via s3-01 is immediately readable via s3-02/s3-03",
+      "status": "PASS",
+      "evidence": {
+        "max_visibility_lag_ms": 42,
+        "p50_ms": 16
+      },
+      "seconds": 0.6
+    },
+    {
+      "id": "C04",
+      "category": "functional",
+      "title": "Landing tier: new bucket data is on SSD with 010 (cross-rack) replicas",
+      "expected": "all archive volumes ssd; each volume has 2 copies in 2 different racks",
+      "status": "PASS",
+      "evidence": {
+        "volumes_with_data": 6,
+        "not_ssd": [],
+        "bad_replication": []
+      },
+      "seconds": 0.0
+    },
+    {
+      "id": "D01",
+      "category": "security",
+      "title": "S3 IAM: anonymous / wrong secret / out-of-scope actions denied",
+      "expected": "403 for anon, bad key, bucket create by app, write by monitor",
+      "status": "PASS",
+      "evidence": {
+        "anonymous_get": 403,
+        "bad_secret": 403,
+        "app_create_bucket": 403,
+        "monitor_put": 403,
+        "monitor_list": "allowed (expected)"
+      },
+      "seconds": 0.0
+    },
+    {
+      "id": "D02",
+      "category": "security",
+      "title": "gRPC mTLS enforced (weed shell without client cert)",
+      "expected": "connection refused / times out without certs",
+      "status": "PASS",
+      "evidence": "shell could not establish a gRPC session within 15s (TLS handshake rejected)",
+      "seconds": 15.0
+    },
+    {
+      "id": "D03",
+      "category": "security",
+      "title": "Volume write without JWT rejected",
+      "expected": "401 Unauthorized",
+      "status": "PASS",
+      "evidence": "HTTP 401",
+      "seconds": 0.0
+    },
+    {
+      "id": "D04",
+      "category": "security",
+      "title": "Filer HTTP port bypasses S3 IAM (unauthenticated read)",
+      "expected": "application network cannot read objects via filer :8888",
+      "status": "FINDING",
+      "evidence": "filer HTTP returned object bytes without credentials. Firewall filer 8888/18888 to S3 gateways + ops only, and/or set [jwt.filer_signing(.read)] keys",
+      "seconds": 0.0
+    },
+    {
+      "id": "D05",
+      "category": "security",
+      "title": "Master HTTP /dir/assign reachable without auth",
+      "expected": "application network cannot obtain write tokens from masters",
+      "status": "FINDING",
+      "evidence": "master issued fid+JWT to an anonymous caller - JWT only protects volume servers if master HTTP 9333 is firewalled to cluster members; restrict with -whiteList or [guard] white_list",
+      "seconds": 0.0
+    },
+    {
+      "id": "E01",
+      "category": "ha",
+      "title": "S3 gateway crash (s3-01) behind F5 pool",
+      "expected": "application continues; errors only until monitor marks member down",
+      "status": "PASS",
+      "evidence": {
+        "during": {
+          "max_stall_s": 0.1,
+          "ops": 490,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 7,
+          "put_max_ms": 13
+        },
+        "after_restore": {
+          "max_stall_s": 0.1,
+          "ops": 159,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 7,
+          "put_max_ms": 46
+        },
+        "lost_acked": 0
+      },
+      "seconds": 31.3
+    },
+    {
+      "id": "E02",
+      "category": "ha",
+      "title": "Filer crash (filer-01)",
+      "expected": "S3 gateways fail over to filer-02/03",
+      "status": "PASS",
+      "evidence": {
+        "during": {
+          "max_stall_s": 0,
+          "ops": 0,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 0,
+          "put_max_ms": 0
+        },
+        "after_restore": {
+          "max_stall_s": 0.1,
+          "ops": 164,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 7,
+          "put_max_ms": 11
+        },
+        "lost_acked": 0
+      },
+      "seconds": 30.7
+    },
+    {
+      "id": "E03",
+      "category": "ha",
+      "title": "Master LEADER crash",
+      "expected": "new leader elected; writes continue",
+      "status": "PASS",
+      "evidence": {
+        "old": "127.10.1.11:9333",
+        "new": "127.10.1.13:9333",
+        "election_s": 24.7,
+        "during": {
+          "max_stall_s": 0.0,
+          "ops": 1,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 0,
+          "put_max_ms": 0
+        },
+        "after_restore": {
+          "max_stall_s": 43.9,
+          "ops": 23,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 8,
+          "put_max_ms": 15
+        },
+        "lost_acked": 0
+      },
+      "seconds": 50.1
+    },
+    {
+      "id": "E04",
+      "category": "ha",
+      "title": "Hot volume server crash (hot-01)",
+      "expected": "reads served by cross-rack replica; writes re-routed",
+      "status": "PASS",
+      "evidence": {
+        "reads_with_hot01_down_bad": 0,
+        "during": {
+          "max_stall_s": 0.1,
+          "ops": 786,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 8,
+          "put_max_ms": 59
+        },
+        "after_restore": {
+          "max_stall_s": 0.1,
+          "ops": 160,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 8,
+          "put_max_ms": 15
+        },
+        "lost_acked": 0
+      },
+      "seconds": 44.4
+    },
+    {
+      "id": "E05",
+      "category": "ha",
+      "title": "Full RACK r1 loss (master, filer, s3, hot, cold, admin)",
+      "expected": "remaining racks keep S3 read/write for replicated (hot) data",
+      "status": "PASS",
+      "evidence": {
+        "hot_reads_bad": 0,
+        "leader_after": "127.10.1.13:9333",
+        "hosts_killed": [
+          "primary-master-01",
+          "primary-filer-01",
+          "primary-s3-01",
+          "primary-hot-01",
+          "primary-cold-01",
+          "primary-admin"
+        ],
+        "during": {
+          "max_stall_s": 15.1,
+          "ops": 556,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 7,
+          "put_max_ms": 15076
+        },
+        "after_restore": {
+          "max_stall_s": 0.1,
+          "ops": 160,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 8,
+          "put_max_ms": 12
+        },
+        "lost_acked": 0
+      },
+      "seconds": 48.6
+    },
+    {
+      "id": "E06",
+      "category": "ha",
+      "title": "Rolling restart of every service (upgrade procedure) under load",
+      "expected": "zero application-visible errors with one-at-a-time restarts + gates",
+      "status": "PASS",
+      "evidence": {
+        "restarted": 15,
+        "minutes": 2.7,
+        "load": {
+          "max_stall_s": 13.5,
+          "ops": 3587,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 7,
+          "put_max_ms": 13479
+        },
+        "lost_acked": 0
+      },
+      "seconds": 171.8
+    },
+    {
+      "id": "F01",
+      "category": "tiering",
+      "title": "Enterprise Volume Tiering policy (tiering.apply / status)",
+      "expected": "policy validates and binds archive collection",
+      "status": "SKIP",
+      "evidence": "OSS build in lab - tiering.* commands are Enterprise-only. Rendered policy: /home/claude/seaweedfs-deploy/build/lab/primary/_cluster/tiering.json. Run F01 on the Enterprise staging cluster.",
+      "seconds": 0.0
+    },
+    {
+      "id": "F02",
+      "category": "tiering",
+      "title": "Hot(SSD, 010) -> Cold(HDD, EC 10+4) demotion after quiet period",
+      "expected": "quiet SSD volumes become EC shards on HDD; objects still readable via S3",
+      "status": "FINDING",
+      "evidence": {
+        "ec_volumes": 18,
+        "shards_total": 252,
+        "shards_on_hot_nodes_pct": 12.7,
+        "worst_shards_on_one_node": 12,
+        "volumes_not_14_shards": [],
+        "ssd_volumes_with_data_after": 0,
+        "unreadable": [],
+        "encode_attempts": 3,
+        "shell_lock_contention_with_admin": false,
+        "encode_seconds": 48.8,
+        "encode_tail": "1:8080\ndeleted volume 2 from 127.10.10.11:8080\ndeleted volume 5 from 127.10.10.11:8080\ndeleted volume 3 from 127.10.10.11:8080\nSuccessfully completed EC encoding for 8 volumes\nSuccessfully completed EC encoding for 18 volumes in 2 batch(es)",
+        "note": "objects readable, but shard placement is NOT on the cold tier / not failure-domain safe - always verify placement after demotion"
+      },
+      "seconds": 58.7
+    },
+    {
+      "id": "F02b",
+      "category": "tiering",
+      "title": "Re-balance EC shards onto the cold (HDD) tier",
+      "expected": "ec.balance -diskType=hdd moves all shards to cold nodes, max shards/node minimised",
+      "status": "FINDING",
+      "evidence": {
+        "shards_total": 252,
+        "shards_on_hot_nodes_pct": 12.7,
+        "worst_shards_on_one_node": 12,
+        "volumes_not_14_shards": [],
+        "unreadable": 0,
+        "balance_tail": ""
+      },
+      "seconds": 6.9
+    },
+    {
+      "id": "F03",
+      "category": "tiering",
+      "title": "Cold node loss with EC 10+4 on 3 cold nodes (v1.0 'Test D')",
+      "expected": "v1.0 expects: EC remains readable",
+      "status": "FINDING",
+      "evidence": {
+        "max_shards_on_one_node": {
+          "127.10.10.11:8080": 7,
+          "127.10.20.11:8081": 12,
+          "127.10.20.12:8081": 1,
+          "127.10.20.13:8081": 12,
+          "127.10.10.13:8080": 9
+        },
+        "parity": 4,
+        "unreadable_while_down": "52/300",
+        "unreadable_after_restart": 0
+      },
+      "seconds": 106.3
+    },
+    {
+      "id": "F04",
+      "category": "tiering",
+      "title": "New writes after demotion land on SSD again",
+      "expected": "fresh volumes on ssd",
+      "status": "PASS",
+      "evidence": {
+        "ssd_volumes_with_data": 6,
+        "hdd_replicated_volumes": 0
+      },
+      "seconds": 9.3
+    },
+    {
+      "id": "G01",
+      "category": "dr",
+      "title": "DR seed: initial snapshot replicated (incl. EC'd cold data)",
+      "expected": "every primary object present on DR with same MD5",
+      "status": "FINDING",
+      "evidence": {
+        "log_replay_result": {
+          "src_objects": 4612,
+          "dst_objects": 1035,
+          "missing_on_dst": 3577
+        },
+        "silent_gap_pct": 77.6,
+        "repair_copied": 3577,
+        "after_repair_missing": 0,
+        "note": "seed via metadata-log replay silently missed objects (no error logged). A seed MUST be a snapshot/tree copy (Enterprise DM initial snapshot) and MUST be verified by listing+ETag diff before DR is declared ready"
+      },
+      "seconds": 68.1
+    },
+    {
+      "id": "G02",
+      "category": "dr",
+      "title": "Continuous replication lag (PUT on primary -> visible on DR)",
+      "expected": "lag well under RPO",
+      "status": "PASS",
+      "evidence": {
+        "p50_s": 0.22,
+        "p95_s": 0.32,
+        "max_s": 0.32,
+        "rpo_s": 60
+      },
+      "seconds": 8.0
+    },
+    {
+      "id": "G03",
+      "category": "dr",
+      "title": "Delete propagation (mirror semantics)",
+      "expected": "delete on primary removes object on DR",
+      "status": "PASS",
+      "evidence": {
+        "propagation_s": 0.41,
+        "note": "a mirror is NOT a backup - keep a separate BACKUP policy with deletes OFF"
+      },
+      "seconds": 0.4
+    },
+    {
+      "id": "G06",
+      "category": "dr",
+      "title": "Replication source filer (filer-01) crash",
+      "expected": "replication continues or catches up after restart without gaps",
+      "status": "FINDING",
+      "evidence": {
+        "acked": 219,
+        "missing_on_dr_after_90s": 2,
+        "catch_up_s": 94.0,
+        "load": {
+          "max_stall_s": 15.4,
+          "ops": 438,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 7,
+          "put_max_ms": 15406
+        },
+        "repaired_by_reconcile": 2,
+        "note": "single-source replication stream lost events written while its source filer was down; replication source must be HA and gaps must be detected by periodic reconcile"
+      },
+      "seconds": 123.1
+    },
+    {
+      "id": "G04",
+      "category": "dr",
+      "title": "Where do replicated objects land on DR?",
+      "expected": "(design note) DR landing tier",
+      "status": "FINDING",
+      "evidence": {
+        "dr_ssd_volumes": 12,
+        "dr_hdd_volumes": 0,
+        "note": "seeded data (incl. data already EC'd on primary) re-lands on DR SSD and is 'new' for quietForSeconds: DR SSD must absorb the whole seed, or seed with a DR-only short-quiet profile"
+      },
+      "seconds": 0.0
+    },
+    {
+      "id": "G05",
+      "category": "dr",
+      "title": "Same S3 identities work on DR (failover without app re-config)",
+      "expected": "archive-app can LIST/GET on DR",
+      "status": "PASS",
+      "evidence": {
+        "listed": 5
+      },
+      "seconds": 0.0
+    },
+    {
+      "id": "H01",
+      "category": "failover",
+      "title": "Unplanned PRIMARY DC loss under load: measured RPO",
+      "expected": "acknowledged writes missing on DR <= RPO window",
+      "status": "PASS",
+      "evidence": {
+        "acked_puts": 470,
+        "acked_after_kill_started": 0,
+        "kill_duration_s": 0.15,
+        "missing_on_dr": 1,
+        "rpo_observed_s": 0.01,
+        "rpo_target_s": 60
+      },
+      "seconds": 28.6
+    },
+    {
+      "id": "H02",
+      "category": "failover",
+      "title": "Activate DR (GSLB -> DR VIP): LIST/GET/PUT on DR",
+      "expected": "all four operations succeed",
+      "status": "PASS",
+      "evidence": {
+        "list": 10,
+        "get_md5_ok": true,
+        "dr_put_list": 51,
+        "technical_rto_s": 13.8,
+        "note": "lab RTO excludes human decision + DNS TTL"
+      },
+      "seconds": 0.2
+    },
+    {
+      "id": "H03",
+      "category": "failover",
+      "title": "Controlled failback: restore primary, replay DR writes, re-establish DR",
+      "expected": "DR-era writes present on primary; primary->DR replication resumes",
+      "status": "PASS",
+      "evidence": {
+        "dr_writes_on_primary": "51/51",
+        "replay_s": 3.4,
+        "forward_replication_resumed": true,
+        "repair": null
+      },
+      "seconds": 17.9
+    },
+    {
+      "id": "H04",
+      "category": "failover",
+      "title": "Post-failback full consistency check primary vs DR",
+      "expected": "no divergence",
+      "status": "FINDING",
+      "evidence": {
+        "primary": 5382,
+        "dr": 5381,
+        "only_primary": [
+          "dr/rpo/000469.bin"
+        ],
+        "only_dr": [],
+        "size_mismatch": [],
+        "only_primary_n": 1,
+        "only_dr_n": 0,
+        "note": "divergence limited to writes acknowledged by primary but not yet replicated at crash time (the RPO window). They exist only on the recovered primary; reconcile before re-enabling DR mirror deletes."
+      },
+      "seconds": 11.1
+    }
+  ]
+}

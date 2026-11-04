@@ -1,0 +1,27 @@
+{
+ "tune": true,
+ "guard": false,
+ "rate": 5.0,
+ "down_s": 20,
+ "tuning": {
+  "admin": {
+   "execution_timeout_seconds": 900,
+   "job_type_max_runtime_seconds": 900
+  },
+  "worker": {
+   "slice_max_runtime_seconds": {
+    "int64_value": "600"
+   }
+  }
+ },
+ "recovery_s": 821.9,
+ "healed_by": "self",
+ "acked": 4264,
+ "missing_before": 2268,
+ "missing_window": [
+  2.3,
+  808.0
+ ],
+ "reconcile_log": "{\n  \"bucket\": \"archive\",\n  \"partitions\": 1,\n  \"window\": null,\n  \"mode\": \"list\",\n  \"src_objects\": 4264,\n  \"dst_objects\": 1996,\n  \"missing_on_dst\": 2268,\n  \"extra_on_dst\": 0,\n  \"size_mismatch\": 0,\n  \"copied\": 2268,\n  \"copy_failures\": 0,\n  \"deleted\": 0,\n  \"elapsed_s\": 17.9,\n  \"sample_missing\": [\n    \"selfheal/165857/000059\",\n    \"selfheal/165857/000060\",\n    \"selfheal/165857/000061\",\n    \"selfheal/165857/000062\",\n    \"selfheal/165857/000063\"\n  ],\n  \"sample_extra\": [],\n  \"sample_failures\": []\n}\n",
+ "missing_after": 0
+}

@@ -1,0 +1,16 @@
+{
+ "tune": false,
+ "guard": false,
+ "rate": 5.0,
+ "down_s": 20,
+ "recovery_s": null,
+ "healed_by": "not healed",
+ "acked": 3357,
+ "missing_before": 3309,
+ "missing_window": [
+  0.0,
+  688.6
+ ],
+ "reconcile_log": "{\n  \"bucket\": \"archive\",\n  \"partitions\": 1,\n  \"window\": null,\n  \"mode\": \"list\",\n  \"src_objects\": 3357,\n  \"dst_objects\": 48,\n  \"missing_on_dst\": 3309,\n  \"extra_on_dst\": 0,\n  \"size_mismatch\": 0,\n  \"copied\": 3309,\n  \"copy_failures\": 0,\n  \"deleted\": 0,\n  \"elapsed_s\": 24.3,\n  \"sample_missing\": [\n    \"selfheal/161055/000048\",\n    \"selfheal/161055/000049\",\n    \"selfheal/161055/000050\",\n    \"selfheal/161055/000051\",\n    \"selfheal/161055/000052\"\n  ],\n  \"sample_extra\": [],\n  \"sample_failures\": []\n}\n",
+ "missing_after": 0
+}

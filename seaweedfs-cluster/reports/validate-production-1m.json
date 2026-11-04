@@ -1,0 +1,127 @@
+[
+  {
+    "level": "PASS",
+    "check": "port-plan",
+    "message": "no metrics/HTTP/gRPC(+10000) port collision inside any process"
+  },
+  {
+    "level": "PASS",
+    "check": "master-quorum",
+    "message": "[primary] 3 masters (odd, tolerates 1 loss)"
+  },
+  {
+    "level": "PASS",
+    "check": "replication",
+    "message": "[primary] ssd: 010 across 3 racks"
+  },
+  {
+    "level": "PASS",
+    "check": "replication",
+    "message": "[primary] hdd: 010 across 3 racks"
+  },
+  {
+    "level": "PASS",
+    "check": "ec-node-loss",
+    "message": "[primary] EC 6+3: max 2 shards/node <= 3 parity"
+  },
+  {
+    "level": "PASS",
+    "check": "ec-rack-loss",
+    "message": "[primary] EC 6+3: max 3 shards/rack <= 3 parity"
+  },
+  {
+    "level": "PASS",
+    "check": "filer-ha",
+    "message": "[primary] 3 filer node(s) (min 2)"
+  },
+  {
+    "level": "PASS",
+    "check": "s3-ha",
+    "message": "[primary] 3 s3 node(s) (min 2)"
+  },
+  {
+    "level": "PASS",
+    "check": "metadata-scale",
+    "message": "[primary] 383M filer entries on shared store postgres2"
+  },
+  {
+    "level": "PASS",
+    "check": "ops-rate",
+    "message": "[primary] 12 PUT/s average, 116/s at peak x10: 58/s per filer with one filer down"
+  },
+  {
+    "level": "PASS",
+    "check": "hdd-sizing",
+    "message": "[primary] cold tier 288000GB raw vs 132000GB for 275d x 256GB/d as EC 6+3 at 80% fill"
+  },
+  {
+    "level": "PASS",
+    "check": "ssd-sizing",
+    "message": "[primary] hot tier 69120GB raw vs 57600GB needed (ingest x 90d x 2 copies / watermark)"
+  },
+  {
+    "level": "PASS",
+    "check": "master-quorum",
+    "message": "[dr] 3 masters (odd, tolerates 1 loss)"
+  },
+  {
+    "level": "PASS",
+    "check": "replication",
+    "message": "[dr] ssd: 010 across 3 racks"
+  },
+  {
+    "level": "PASS",
+    "check": "replication",
+    "message": "[dr] hdd: 010 across 3 racks"
+  },
+  {
+    "level": "PASS",
+    "check": "ec-node-loss",
+    "message": "[dr] EC 6+3: max 2 shards/node <= 3 parity"
+  },
+  {
+    "level": "PASS",
+    "check": "ec-rack-loss",
+    "message": "[dr] EC 6+3: max 3 shards/rack <= 3 parity"
+  },
+  {
+    "level": "PASS",
+    "check": "filer-ha",
+    "message": "[dr] 3 filer node(s) (min 2)"
+  },
+  {
+    "level": "PASS",
+    "check": "s3-ha",
+    "message": "[dr] 3 s3 node(s) (min 2)"
+  },
+  {
+    "level": "PASS",
+    "check": "metadata-scale",
+    "message": "[dr] 383M filer entries on shared store postgres2"
+  },
+  {
+    "level": "PASS",
+    "check": "ops-rate",
+    "message": "[dr] 12 PUT/s average, 116/s at peak x10: 58/s per filer with one filer down"
+  },
+  {
+    "level": "PASS",
+    "check": "hdd-sizing",
+    "message": "[dr] cold tier 288000GB raw vs 132000GB for 275d x 256GB/d as EC 6+3 at 80% fill"
+  },
+  {
+    "level": "PASS",
+    "check": "ssd-sizing",
+    "message": "[dr] hot tier 69120GB raw vs 57600GB needed (ingest x 90d x 2 copies / watermark)"
+  },
+  {
+    "level": "PASS",
+    "check": "dr-independent",
+    "message": "[dr] separate master quorum from primary"
+  },
+  {
+    "level": "WARN",
+    "check": "dr-seed",
+    "message": "[dr] replicated objects are NEW writes on DR: they land on DR SSD and only demote 90d after the SEED. Size DR SSD for the seed or seed with a temporary short quietForSeconds / HDD landing on DR"
+  }
+]

@@ -1,0 +1,46 @@
+{
+  "inventory": "/home/claude/seaweedfs-deploy/inventory/lab.yaml",
+  "edition": "oss",
+  "weed_version": "version 8000GB 4.47 pypi linux amd64",
+  "started": "2026-09-29 17:50:54",
+  "minutes": 0.3,
+  "summary": {
+    "PASS": 1,
+    "FAIL": 0,
+    "FINDING": 1,
+    "SKIP": 0
+  },
+  "results": [
+    {
+      "id": "A02",
+      "category": "process",
+      "title": "v1.0 port plan reproduced on real binary (metricsPort = port+10000)",
+      "expected": "v1.0 document flags start cleanly",
+      "status": "FINDING",
+      "evidence": {
+        "master -metricsPort=19333": "exited rc=255; F0929 17:50:58.911950 master.go:265 master failed to listen on grpc port 19333: listen tcp 127.99.0.1:19333: bind: address already in use",
+        "volume -metricsPort=18080": "exited rc=255; F0929 17:51:02.888240 volume.go:577 failed to listen on grpc port 18080: listen tcp 127.99.0.1:18080: bind: address already in use",
+        "s3 -metricsPort=18333": "still running; no bind error logged"
+      },
+      "seconds": 16.0
+    },
+    {
+      "id": "B02",
+      "category": "topology",
+      "title": "Volume servers registered with correct DC / rack (+ disk type)",
+      "expected": "each DC: 6 servers, one hot + one cold per rack; disk type confirmed by volume placement (C04/F02)",
+      "status": "PASS",
+      "evidence": {
+        "primary": {
+          "registered": 6,
+          "mismatch": []
+        },
+        "dr": {
+          "registered": 6,
+          "mismatch": []
+        }
+      },
+      "seconds": 0.0
+    }
+  ]
+}

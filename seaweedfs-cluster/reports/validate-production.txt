@@ -1,0 +1,27 @@
+PASS  port-plan       no metrics/HTTP/gRPC(+10000) port collision inside any process
+PASS  master-quorum   [primary] 3 masters (odd, tolerates 1 loss)
+PASS  replication     [primary] ssd: 010 across 3 racks
+PASS  replication     [primary] hdd: 010 across 3 racks
+FAIL  ec-node-loss    [primary] EC 10+4 on 3 cold nodes puts up to 5 shards on one node > 4 parity: losing ONE cold node makes EC data unreadable. Need >= 4 cold nodes, or a narrower code (e.g. 6+3 / 4+2)
+FAIL  ec-rack-loss    [primary] EC 10+4 across 3 racks = 5 shards/rack > 4 parity: a rack failure makes EC data unreadable. Need >= 4 racks or a narrower code
+WARN  ec-min-nodes    [primary] weed ec.encode refuses < 4 nodes without -force
+PASS  filer-ha        [primary] 3 filer node(s) (min 2)
+PASS  s3-ha           [primary] 3 s3 node(s) (min 2)
+WARN  filer-store     [primary] leveldb2 per filer: each filer holds a full metadata copy synced via peers. Fine to ~100M entries; use a shared HA store (postgres2/TiKV/etc.) beyond that
+WARN  ssd-sizing      [primary] sla.daily_ingest_gb unset - cannot prove 90-day SSD capacity (11520GB raw SSD)
+PASS  master-quorum   [dr] 3 masters (odd, tolerates 1 loss)
+PASS  replication     [dr] ssd: 010 across 3 racks
+PASS  replication     [dr] hdd: 010 across 3 racks
+FAIL  ec-node-loss    [dr] EC 10+4 on 3 cold nodes puts up to 5 shards on one node > 4 parity: losing ONE cold node makes EC data unreadable. Need >= 4 cold nodes, or a narrower code (e.g. 6+3 / 4+2)
+FAIL  ec-rack-loss    [dr] EC 10+4 across 3 racks = 5 shards/rack > 4 parity: a rack failure makes EC data unreadable. Need >= 4 racks or a narrower code
+WARN  ec-min-nodes    [dr] weed ec.encode refuses < 4 nodes without -force
+PASS  filer-ha        [dr] 3 filer node(s) (min 2)
+PASS  s3-ha           [dr] 3 s3 node(s) (min 2)
+WARN  filer-store     [dr] leveldb2 per filer: each filer holds a full metadata copy synced via peers. Fine to ~100M entries; use a shared HA store (postgres2/TiKV/etc.) beyond that
+WARN  ssd-sizing      [dr] sla.daily_ingest_gb unset - cannot prove 90-day SSD capacity (11520GB raw SSD)
+PASS  dr-independent  [dr] separate master quorum from primary
+WARN  dr-seed         [dr] replicated objects are NEW writes on DR: they land on DR SSD and only demote 90d after the SEED. Size DR SSD for the seed or seed with a temporary short quietForSeconds / HDD landing on DR
+WARN  sla             sla.rpo_seconds not approved - replication-lag alerting uses a placeholder
+WARN  sla             sla.rto_minutes not approved - replication-lag alerting uses a placeholder
+
+25 checks: 12 pass, 9 warn, 4 fail

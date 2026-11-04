@@ -1,0 +1,6 @@
+
+▶ bootstrap dr
+  create bucket under /buckets
+    created bucket archive
+  applied tiering config revision 1: 1 profile(s), 1 binding(s)
+✔ landing gate archive: PASS after 22s / 3 probe(s): ('ssd', 'archive-data', 'archive')

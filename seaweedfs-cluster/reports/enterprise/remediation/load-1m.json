@@ -1,0 +1,61 @@
+{
+ "target": {
+  "daily_files": 1000000,
+  "peak_factor": 10,
+  "put_per_s": 115.7,
+  "get_per_s": 115.7,
+  "avg_kb": 64,
+  "duration_s": 300.0
+ },
+ "achieved": {
+  "put_per_s": 115.7,
+  "get_per_s": 115.7,
+  "objects": 34722,
+  "gb": 2.259,
+  "equiv_files_per_day": 9999618
+ },
+ "put_ms": {
+  "p50": 13.6,
+  "p95": 66.0,
+  "p99": 131.9,
+  "max": 475.1
+ },
+ "get_ms": {
+  "p50": 7.8,
+  "p95": 48.7,
+  "p99": 109.2,
+  "max": 479.7
+ },
+ "errors": {
+  "put": 0,
+  "get": 0
+ },
+ "shed_requests": 0,
+ "dr_lag_s": {
+  "samples": 14,
+  "failed": 0,
+  "p50": 0.535,
+  "max": 0.55
+ },
+ "dr_window_check": {
+  "src_objects": 34722,
+  "dst_objects": 34720,
+  "missing_on_dst": 2,
+  "size_mismatch": 0,
+  "elapsed_s": 70.0,
+  "mode": "head"
+ },
+ "dr_recheck_10min": {
+  "missing_on_dst": 2,
+  "sample": [
+   "ingest/2026/10/07/18/746b6e-00030343",
+   "ingest/2026/10/07/18/746b6e-00030349"
+  ],
+  "note": "still missing 10 min after the load; no error in worker or DR filer logs; policy caught_up"
+ },
+ "first_attempt": {
+  "result": "hot tier ran out of volume slots after 86 s (9,942 PUTs): every PUT then failed with 'no writable volumes ... disk ssd'; DR hot tier full too, Data Movement stalled",
+  "lab_hot_slots": "3 x 24 per DC (64 MB volumes)",
+  "fix": "lab hot -max raised to 120 slots per node"
+ }
+}

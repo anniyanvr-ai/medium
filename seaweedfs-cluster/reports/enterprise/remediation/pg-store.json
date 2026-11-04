@@ -1,0 +1,34 @@
+{
+ "store": "postgres2",
+ "pg": "PostgreSQL 16 (lab, single instance)",
+ "P1": {
+  "written": 300,
+  "listed_per_filer": {
+   "127.30.0.21:8888": 300,
+   "127.30.0.22:8888": 300,
+   "127.30.0.23:8888": 300
+  },
+  "check_s": 0.02,
+  "status": "PASS"
+ },
+ "P2": {
+  "acked": 1740,
+  "missing_on_filer2": 0,
+  "missing_on_filer3": 0,
+  "unreadable_sampled": 0,
+  "killed": "filer1 (SIGKILL) under 4-thread write load",
+  "status": "PASS"
+ },
+ "P3": {
+  "entries_created": 20000,
+  "seconds": 23.1,
+  "entries_per_s": 867,
+  "pg_rows": 22071,
+  "pg_db_bytes": 15817751,
+  "bytes_per_entry": 360,
+  "projected_gb_for_383M_entries": 138,
+  "note": "bytes/entry = table+index size of the filer tables / live rows (empty-database overhead excluded); lab: PG, filers and client share 2 vCPU",
+  "raw": "7946240|644",
+  "table_index_bytes": 7946240
+ }
+}

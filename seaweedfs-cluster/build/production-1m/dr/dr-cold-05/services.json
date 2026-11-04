@@ -1,0 +1,27 @@
+[
+  {
+    "name": "seaweed-volume-cold",
+    "kind": "volume_cold",
+    "phase": "volume",
+    "ip": "10.20.20.15",
+    "http": 8081,
+    "grpc": 18081,
+    "metrics": 9326,
+    "args": [
+      "volume",
+      "-ip=10.20.20.15",
+      "-port=8081",
+      "-dir=/data/hdd1,/data/hdd2,/data/hdd3",
+      "-disk=hdd,hdd,hdd",
+      "-max=480,480,480",
+      "-master=10.20.1.11:9333,10.20.1.12:9333,10.20.1.13:9333",
+      "-dataCenter=dc2",
+      "-rack=r3",
+      "-index=leveldb",
+      "-minFreeSpace=5",
+      "-compactionMBps=50",
+      "-metricsIp=10.20.20.15",
+      "-metricsPort=9326"
+    ]
+  }
+]

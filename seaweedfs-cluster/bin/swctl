@@ -1,0 +1,1556 @@
+#!/usr/bin/env python3
+"""
+swctl - SeaweedFS (Enterprise/OSS) cluster lifecycle tool.
+
+One inventory file drives every step:
+
+    swctl validate  -i inventory/production.yaml            # static design checks
+    swctl render    -i inventory/production.yaml            # systemd units, configs, PKI, monitoring
+    swctl install   -i ... --cluster primary --binary ./weed   # push binary + OS prep (ssh)
+    swctl deploy    -i ... --cluster primary                 # phased start with health gates
+    swctl bootstrap -i ... --cluster primary                 # buckets, landing tier, tiering policy
+    swctl verify    -i ... --cluster primary                 # full health report
+    swctl status | start | stop | restart | shell | plan
+
+Transports: ssh (production, systemd) or local (lab, plain processes on
+loopback IPs). Both consume the *same* rendered files, so the lab exercises
+exactly what production will run.
+"""
+from __future__ import annotations
+
+import argparse
+import copy
+import hashlib
+import json
+import math
+import os
+import secrets
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import tarfile
+import textwrap
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass, field
+from pathlib import Path
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover
+    sys.exit("swctl needs PyYAML:  pip install pyyaml")
+
+# --------------------------------------------------------------------------- #
+# Constants
+# --------------------------------------------------------------------------- #
+PHASES = ["master", "volume", "filer", "s3", "admin", "worker", "sync"]
+KIND_PHASE = {
+    "master": "master", "volume_hot": "volume", "volume_cold": "volume",
+    "filer": "filer", "s3": "s3", "admin": "admin", "worker": "worker",
+    "filer_sync": "sync",
+}
+GRPC_OFFSET = 10000
+C = {"ok": "\033[32m", "warn": "\033[33m", "fail": "\033[31m", "dim": "\033[2m", "end": "\033[0m"}
+if not sys.stdout.isatty():
+    C = {k: "" for k in C}
+
+
+def log(msg, level="info"):
+    prefix = {"info": "  ", "ok": f"{C['ok']}✔{C['end']} ", "warn": f"{C['warn']}!{C['end']} ",
+              "fail": f"{C['fail']}✘{C['end']} ", "step": "\n▶ "}[level]
+    print(prefix + msg, flush=True)
+
+
+# --------------------------------------------------------------------------- #
+# Inventory model
+# --------------------------------------------------------------------------- #
+@dataclass
+class Service:
+    cluster: str
+    host: str
+    ip: str
+    rack: str
+    kind: str
+    name: str                    # systemd unit stem, e.g. seaweed-master
+    args: list = field(default_factory=list)
+    http_port: int | None = None
+    metrics_port: int | None = None
+    health_path: str | None = None
+
+    @property
+    def phase(self):
+        return KIND_PHASE[self.kind]
+
+    @property
+    def grpc_port(self):
+        return self.http_port + GRPC_OFFSET if self.http_port else None
+
+    @property
+    def addr(self):
+        return f"{self.ip}:{self.http_port}"
+
+
+class Inventory:
+    def __init__(self, path: str):
+        self.path = Path(path).resolve()
+        with open(self.path) as fh:
+            self.raw = yaml.safe_load(fh)
+        self.g = self.raw["global"]
+        self.clusters = self.raw["clusters"]
+        self.sla = self.raw.get("sla", {}) or {}
+        self.base = self.path.parent.parent            # project root
+        self.build_dir = Path(self.g.get("build_dir", self.base / "build" / self.path.stem))
+        if not self.build_dir.is_absolute():
+            self.build_dir = (self.base / self.build_dir).resolve()
+
+    # --- path handling: local transport relocates every absolute path -------- #
+    @property
+    def local(self):
+        return self.g.get("transport", "ssh") == "local"
+
+    def prefix(self, cluster, host):
+        tpl = self.g.get("path_prefix")
+        if not tpl:
+            return ""
+        p = tpl.format(cluster=cluster, host=host)
+        if not os.path.isabs(p):
+            p = str((self.base / p).resolve())
+        return p
+
+    def p(self, cluster, host, path):
+        """Path as seen by the running process on that host."""
+        return self.prefix(cluster, host) + path
+
+    # --- lookups ------------------------------------------------------------ #
+    def nodes(self, cluster, role=None):
+        out = []
+        for n in self.clusters[cluster]["nodes"]:
+            if role is None or role in n["roles"]:
+                out.append(n)
+        return out
+
+    def ports(self, cluster=None):
+        """Global port plan, optionally overridden per cluster (clusters.X.ports_override)."""
+        pts = copy.deepcopy(self.g["ports"])
+        if cluster:
+            for k, v in (self.clusters[cluster].get("ports_override") or {}).items():
+                pts.setdefault(k, {}).update(v)
+        return pts
+
+    def port(self, kind, key="http", cluster=None):
+        return self.ports(cluster)[kind][key]
+
+    def masters(self, cluster):
+        return [f"{n['ip']}:{self.port('master', cluster=cluster)}" for n in self.nodes(cluster, "master")]
+
+    def filers(self, cluster):
+        return [f"{n['ip']}:{self.port('filer', cluster=cluster)}" for n in self.nodes(cluster, "filer")]
+
+    def s3s(self, cluster):
+        return [f"{n['ip']}:{self.port('s3', cluster=cluster)}" for n in self.nodes(cluster, "s3")]
+
+    def admin_node(self, cluster):
+        a = self.nodes(cluster, "admin")
+        return a[0] if a else None
+
+    # --- service model ------------------------------------------------------ #
+    def services(self, cluster) -> list[Service]:
+        g, cl = self.g, self.clusters[cluster]
+        ports = self.ports(cluster)
+        dc = cl["datacenter"]
+        cfg = g["config_dir"]
+        data = g["data_root"]
+        m_list = ",".join(self.masters(cluster))
+        f_list = ",".join(self.filers(cluster))
+        out: list[Service] = []
+        for n in cl["nodes"]:
+            h, ip, rack = n["host"], n["ip"], n["rack"]
+            P = lambda x: self.p(cluster, h, x)  # noqa: E731
+            for role in n["roles"]:
+                if role == "master":
+                    pt = ports["master"]
+                    m = g["master"]
+                    args = ["master", f"-ip={ip}", f"-port={pt['http']}",
+                            f"-mdir={P(data + '/master')}", f"-peers={m_list}",
+                            f"-volumeSizeLimitMB={m['volume_size_limit_mb']}",
+                            f"-defaultReplication={m['default_replication']}",
+                            f"-metricsIp={ip}", f"-metricsPort={pt['metrics']}"]
+                    if m.get("raft_hashicorp"):
+                        args.append("-raftHashicorp")
+                    out.append(Service(cluster, h, ip, rack, "master", "seaweed-master", args,
+                                       pt["http"], pt["metrics"], "/healthz"))
+                elif role in ("volume_hot", "volume_cold"):
+                    pt = ports[role]
+                    v = g["volume"]
+                    vol_gb = g["master"]["volume_size_limit_mb"] / 1000.0
+                    dirs, types, maxes = [], [], []
+                    for d in n["disks"]:
+                        dirs.append(P(d["path"]))
+                        types.append(d["type"])
+                        mx = d.get("max")
+                        if mx is None:
+                            mx = max(1, int(d["size_gb"] * 0.9 // vol_gb))   # keep ~10% headroom
+                        maxes.append(str(mx))
+                    args = ["volume", f"-ip={ip}", f"-port={pt['http']}",
+                            f"-dir={','.join(dirs)}", f"-disk={','.join(types)}",
+                            f"-max={','.join(maxes)}", f"-master={m_list}",
+                            f"-dataCenter={dc}", f"-rack={rack}",
+                            f"-index={v.get('index', 'memory')}",
+                            f"-minFreeSpace={v.get('min_free_space', '1')}",
+                            f"-compactionMBps={v.get('compaction_mbps', 0)}",
+                            f"-metricsIp={ip}", f"-metricsPort={pt['metrics']}"]
+                    if v.get("allow_untrusted_remote_endpoints"):
+                        # lab only: volume-to-volume copies between loopback "hosts" are refused otherwise
+                        args.append("-volume.allowUntrustedRemoteEndpoints")
+                    name = "seaweed-volume-hot" if role == "volume_hot" else "seaweed-volume-cold"
+                    out.append(Service(cluster, h, ip, rack, role, name, args,
+                                       pt["http"], pt["metrics"], "/healthz"))
+                elif role == "filer":
+                    pt = ports["filer"]
+                    args = ["filer", f"-ip={ip}", f"-port={pt['http']}", f"-master={m_list}",
+                            f"-dataCenter={dc}", f"-rack={rack}",
+                            f"-defaultStoreDir={P(data + '/filer')}",
+                            f"-localSocket={P(data + '/filer.sock')}",
+                            f"-metricsIp={ip}", f"-metricsPort={pt['metrics']}"]
+                    out.append(Service(cluster, h, ip, rack, "filer", "seaweed-filer", args,
+                                       pt["http"], pt["metrics"], "/healthz"))
+                elif role == "s3":
+                    pt = ports["s3"]
+                    args = ["s3", f"-ip.bind={ip}", f"-port={pt['http']}", f"-filer={f_list}",
+                            f"-config={P(cfg + '/s3.json')}", f"-dataCenter={dc}",
+                            f"-localSocket={P(data + '/s3.sock')}",
+                            f"-metricsIp={ip}", f"-metricsPort={pt['metrics']}"]
+                    out.append(Service(cluster, h, ip, rack, "s3", "seaweed-s3", args,
+                                       pt["http"], pt["metrics"], "/healthz"))
+                elif role == "admin":
+                    pt = ports["admin"]
+                    args = ["admin", f"-ip={ip}", f"-port={pt['http']}", f"-master={m_list}",
+                            f"-dataDir={P(data + '/admin')}",
+                            f"-metricsIp={ip}", f"-metricsPort={pt['metrics']}"]
+                    out.append(Service(cluster, h, ip, rack, "admin", "seaweed-admin", args,
+                                       pt["http"], pt["metrics"], "/health"))
+                elif role == "worker":
+                    adm = self.admin_node(cluster)
+                    wcfg = g.get("workers", {"count": 1, "job_types": "all"})
+                    for i in range(1, wcfg["count"] + 1):
+                        mp = ports["worker"]["metrics_base"] + i - 1
+                        args = ["worker", f"-admin={adm['ip']}:{ports['admin']['http']}",
+                                f"-workingDir={P(data + f'/worker{i}')}",
+                                f"-jobType={wcfg.get('job_types', 'all')}",
+                                f"-metricsIp={ip}", f"-metricsPort={mp}"]
+                        out.append(Service(cluster, h, ip, rack, "worker", f"seaweed-worker{i}",
+                                           args, None, mp, None))
+                elif role == "filer_sync":
+                    src = cl["replicate_from"]
+                    for j, path in enumerate(cl.get("replication_paths", ["/buckets"]), 1):
+                        args = ["filer.sync", f"-a={self.filers(src)[0]}", f"-b={self.filers(cluster)[0]}",
+                                f"-a.path={path}", f"-b.path={path}", "-isActivePassive",
+                                f"-a.security={P(cfg + '/sync-source-security.toml')}",
+                                f"-b.security={P(cfg + '/security.toml')}",
+                                f"-metricsIp={ip}", f"-metricsPort={ports['worker']['metrics_base'] + 10 + j}"]
+                        out.append(Service(cluster, h, ip, rack, "filer_sync", f"seaweed-filer-sync{j}",
+                                           args, None, None, None))
+        return out
+
+
+# --------------------------------------------------------------------------- #
+# Validation (design-level checks; fail fast before touching any server)
+# --------------------------------------------------------------------------- #
+def validate(inv: Inventory) -> list[tuple[str, str, str]]:
+    res: list[tuple[str, str, str]] = []
+    add = lambda lvl, chk, msg: res.append((lvl, chk, msg))  # noqa: E731
+    g = inv.g
+
+    # 1. Port plan: metrics must not collide with any HTTP or implicit gRPC port
+    used = {}
+    for kind, pt in g["ports"].items():
+        if "http" in pt:
+            used.setdefault(pt["http"], []).append(f"{kind}.http")
+            used.setdefault(pt["http"] + GRPC_OFFSET, []).append(f"{kind}.grpc")
+    for kind, pt in g["ports"].items():
+        for k in ("metrics",):
+            if k in pt:
+                used.setdefault(pt[k], []).append(f"{kind}.metrics")
+    wm = g["ports"]["worker"]["metrics_base"]
+    for i in range(g.get("workers", {}).get("count", 1)):
+        used.setdefault(wm + i, []).append(f"worker{i+1}.metrics")
+    # collisions only matter when both roles can land on the same host
+    shared_hosts = {}
+    for cname in inv.clusters:
+        for n in inv.nodes(cname):
+            shared_hosts.setdefault(tuple(sorted(n["roles"])), n["host"])
+    coll = {p: owners for p, owners in used.items() if len({o.split('.')[0] for o in owners}) < len(owners)
+            or len(owners) > 1}
+    same_kind = {p: o for p, o in coll.items() if len({x.split('.')[0] for x in o}) == 1}
+    if same_kind:
+        for p, o in same_kind.items():
+            add("FAIL", "port-plan", f"port {p} used twice by the same process: {o}")
+    else:
+        add("PASS", "port-plan", "no metrics/HTTP/gRPC(+10000) port collision inside any process")
+    cross = {p: o for p, o in coll.items() if p not in same_kind}
+    if cross:
+        add("WARN", "port-plan", f"ports shared across roles (ok only if never co-located): {cross}")
+
+    for cname, cl in inv.clusters.items():
+        tag = f"[{cname}]"
+        masters = inv.nodes(cname, "master")
+        racks = sorted({n["rack"] for n in inv.nodes(cname)})
+        # 2. Master quorum
+        if len(masters) % 2 == 1 and len(masters) >= 3:
+            add("PASS", "master-quorum", f"{tag} {len(masters)} masters (odd, tolerates {(len(masters)-1)//2} loss)")
+        else:
+            add("FAIL", "master-quorum", f"{tag} {len(masters)} masters - need an odd number >= 3")
+        if len({n['rack'] for n in masters}) < len(masters):
+            add("WARN", "master-racks", f"{tag} two masters share a rack; a rack loss can break quorum")
+        # 3. Replication vs topology (per disk type)
+        rep = g["master"]["default_replication"]
+        dc_n, rack_n, srv_n = int(rep[0]), int(rep[1]), int(rep[2])
+        for dtype in (g["tiering"]["hot_disk"], g["tiering"]["cold_disk"]):
+            servers = [n for n in inv.nodes(cname) if any(d["type"] == dtype for d in n.get("disks", []))]
+            rk = {}
+            for s in servers:
+                rk.setdefault(s["rack"], []).append(s["host"])
+            need_racks = rack_n + 1
+            if len(rk) < need_racks:
+                add("FAIL", "replication", f"{tag} {dtype}: replication {rep} needs {need_racks} racks, found {len(rk)}")
+            elif len(rk) < need_racks + 1:
+                add("WARN", "replication", f"{tag} {dtype}: replication {rep} fits, but no spare rack: after one "
+                    f"rack loss new {rep} volumes can still be created on {len(rk)-1} racks"
+                    if len(rk) - 1 >= need_racks else
+                    f"{tag} {dtype}: only {len(rk)} racks - a rack failure blocks new {rep} volume growth")
+            else:
+                add("PASS", "replication", f"{tag} {dtype}: {rep} across {len(rk)} racks")
+            if srv_n and min(len(v) for v in rk.values()) < srv_n + 1:
+                add("FAIL", "replication", f"{tag} {dtype}: {rep} needs {srv_n+1} servers per rack")
+            if dc_n:
+                add("FAIL", "replication", f"{tag} cross-DC replication digit set in {rep}; DR must use Data Movement")
+        # 4. Erasure coding vs failure domains
+        ec = g["tiering"]["ec"]
+        k, m = ec["data_shards"], ec["parity_shards"]
+        total = k + m
+        cold = [n for n in inv.nodes(cname) if any(d["type"] == g["tiering"]["cold_disk"] for d in n.get("disks", []))]
+        cold_racks = {n["rack"] for n in cold}
+        per_node = math.ceil(total / max(1, len(cold)))
+        per_rack = math.ceil(total / max(1, len(cold_racks)))
+        if per_node > m:
+            add("FAIL", "ec-node-loss", f"{tag} EC {k}+{m} on {len(cold)} cold nodes puts up to {per_node} shards on one "
+                f"node > {m} parity: losing ONE cold node makes EC data unreadable. Need >= {math.ceil(total / m)} "
+                f"cold nodes, or a narrower code (e.g. 6+3 / 4+2)")
+        else:
+            add("PASS", "ec-node-loss", f"{tag} EC {k}+{m}: max {per_node} shards/node <= {m} parity")
+        if per_rack > m:
+            add("FAIL", "ec-rack-loss", f"{tag} EC {k}+{m} across {len(cold_racks)} racks = {per_rack} shards/rack > {m} "
+                f"parity: a rack failure makes EC data unreadable. Need >= {math.ceil(total / m)} racks or a narrower code")
+        else:
+            add("PASS", "ec-rack-loss", f"{tag} EC {k}+{m}: max {per_rack} shards/rack <= {m} parity")
+        if len(cold) < 4:
+            add("WARN", "ec-min-nodes", f"{tag} weed ec.encode refuses < 4 nodes without -force")
+        # 5. Filers / S3 HA
+        for role, mn in (("filer", 2), ("s3", 2)):
+            cnt = len(inv.nodes(cname, role))
+            add("PASS" if cnt >= mn else "FAIL", f"{role}-ha", f"{tag} {cnt} {role} node(s) (min {mn})")
+        if g["filer"]["store"] == "leveldb2" and len(inv.nodes(cname, "filer")) > 1:
+            add("WARN", "filer-store", f"{tag} leveldb2 per filer: each filer holds a full metadata copy synced via "
+                "peers. Fine to ~100M entries; use a shared HA store (postgres2/TiKV/etc.) beyond that")
+        # 6. Volume sizing
+        vol_gb = g["master"]["volume_size_limit_mb"] / 1000.0
+        for n in inv.nodes(cname):
+            for d in n.get("disks", []):
+                if "size_gb" in d and d.get("max"):
+                    if d["max"] * vol_gb > d["size_gb"]:
+                        add("FAIL", "volume-max", f"{tag} {n['host']}:{d['path']} -max={d['max']} x {vol_gb}GB "
+                            f"> disk {d['size_gb']}GB")
+        # 6b. Object-count capacity model (sla.daily_files / avg_file_kb / retention_days / peak_factor)
+        files = inv.sla.get("daily_files")
+        ingest = inv.sla.get("daily_ingest_gb")
+        if files:
+            avg_kb = inv.sla.get("avg_file_kb") or 256
+            keep = inv.sla.get("retention_days") or 365
+            peak = inv.sla.get("peak_factor") or 10
+            ingest = ingest or files * avg_kb / 1e6
+            entries = files * keep * 1.05                     # + directories / canary / multipart
+            store = g["filer"]["store"]
+            if store == "leveldb2":
+                lvl = "FAIL" if entries > 100e6 else ("WARN" if entries > 30e6 else "PASS")
+                add(lvl, "metadata-scale", f"{tag} {entries/1e6:.0f}M filer entries after {keep}d on leveldb2 "
+                    "(per-filer full copy, peer-synced; lab: limit ~100M). Use postgres2 / TiKV / Cassandra-class "
+                    "shared HA store" if lvl != "PASS" else f"{tag} {entries/1e6:.1f}M entries fits leveldb2")
+            else:
+                add("PASS", "metadata-scale", f"{tag} {entries/1e6:.0f}M filer entries on shared store {store}")
+            avg_s, peak_s = files / 86400, files / 86400 * peak
+            nf = max(1, len(inv.nodes(cname, "filer")))
+            add("PASS" if peak_s / max(1, nf - 1) < 1500 else "WARN", "ops-rate",
+                f"{tag} {avg_s:.0f} PUT/s average, {peak_s:.0f}/s at peak x{peak}: "
+                f"{peak_s / max(1, nf - 1):.0f}/s per filer with one filer down")
+            k_, m_ = g["tiering"]["ec"]["data_shards"], g["tiering"]["ec"]["parity_shards"]
+            cold_days = max(0, keep - g["tiering"]["quiet_for_seconds"] / 86400)
+            cold_need = ingest * cold_days * (k_ + m_) / k_ / 0.80
+            cold_gb = sum(d.get("size_gb", 0) for n in inv.nodes(cname) for d in n.get("disks", [])
+                          if d["type"] == g["tiering"]["cold_disk"])
+            add("PASS" if cold_gb >= cold_need else "FAIL", "hdd-sizing",
+                f"{tag} cold tier {cold_gb:.0f}GB raw vs {cold_need:.0f}GB for {cold_days:.0f}d x {ingest:.0f}GB/d "
+                f"as EC {k_}+{m_} at 80% fill")
+        # 7. SSD sizing vs 90-day window
+        hot = [d for n in inv.nodes(cname) for d in n.get("disks", []) if d["type"] == g["tiering"]["hot_disk"]]
+        hot_gb = sum(d.get("size_gb", 0) for d in hot)
+        if ingest:
+            copies = rack_n + srv_n + 1
+            need = ingest * g["tiering"]["quiet_for_seconds"] / 86400 * copies / g["tiering"]["ssd_pressure"]["high_watermark"]
+            add("PASS" if hot_gb >= need else "FAIL", "ssd-sizing",
+                f"{tag} hot tier {hot_gb:.0f}GB raw vs {need:.0f}GB needed (ingest x 90d x {copies} copies / watermark)")
+        else:
+            add("WARN", "ssd-sizing", f"{tag} sla.daily_ingest_gb unset - cannot prove 90-day SSD capacity "
+                f"({hot_gb:.0f}GB raw SSD)")
+        # 8. DR independence
+        if cl.get("role") == "standby":
+            src = cl.get("replicate_from")
+            if src and set(inv.masters(src)) & set(inv.masters(cname)):
+                add("FAIL", "dr-independent", f"{tag} DR masters overlap with {src} quorum")
+            else:
+                add("PASS", "dr-independent", f"{tag} separate master quorum from {src}")
+            add("WARN", "dr-seed", f"{tag} replicated objects are NEW writes on DR: they land on DR SSD and only "
+                f"demote {g['tiering']['quiet_for_seconds']//86400}d after the SEED. Size DR SSD for the seed or "
+                "seed with a temporary short quietForSeconds / HDD landing on DR")
+        # 9. Admin / workers
+        if g.get("edition") == "enterprise" and inv.nodes(cname, "admin"):
+            colo = [n["host"] for n in inv.nodes(cname, "worker") if "admin" in n["roles"]]
+            if colo and inv.sla.get("daily_files", 0) >= 500_000:
+                add("WARN", "workers", f"{tag} workers share the admin host {colo}: at this ingest rate run Data "
+                    "Movement/tiering workers on >= 2 dedicated hosts in different racks")
+            if (cl.get("data_movement") or any(c.get("replicate_from") == cname for c in inv.clusters.values())) \
+                    and not g.get("data_movement_tuning"):
+                add("WARN", "dm-tuning", f"{tag} data_movement_tuning unset: an orphaned job blocks replication for "
+                    "up to 24 h (E-08); set execution_timeout_seconds/slice_max_runtime_seconds")
+        if not inv.admin_node(cname):
+            add("WARN", "admin", f"{tag} no admin node - tiering/EC-vacuum/data-movement workers cannot run")
+    # 10. SLA
+    for k_ in ("rpo_seconds", "rto_minutes"):
+        if not inv.sla.get(k_):
+            add("WARN", "sla", f"sla.{k_} not approved - replication-lag alerting uses a placeholder")
+    if not g["security"].get("grpc_mtls"):
+        add("WARN", "security", "gRPC mTLS disabled - any host on the network can drive the cluster")
+    if not g["security"].get("jwt_signing"):
+        add("WARN", "security", "JWT signing disabled - volume servers accept unauthenticated writes")
+    return res
+
+
+# --------------------------------------------------------------------------- #
+# Rendering
+# --------------------------------------------------------------------------- #
+UNIT_TMPL = """\
+# Generated by swctl from {inventory} - do not edit by hand
+[Unit]
+Description=SeaweedFS {kind} ({cluster}/{host})
+After=network-online.target {after}
+Wants=network-online.target
+{requires}
+[Service]
+Type=simple
+User={user}
+Group={user}
+WorkingDirectory={cfg}
+EnvironmentFile={cfg}/seaweed.env
+EnvironmentFile={cfg}/{name}.env
+ExecStart={weed} $WEED_ARGS
+Restart=always
+RestartSec=5
+TimeoutStopSec=60
+LimitNOFILE=1048576
+LimitNPROC=65536
+# hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={rw}
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def secret(inv: Inventory, env_name: str, gen: dict, allow_gen: bool) -> str:
+    val = os.environ.get(env_name)
+    if val:
+        return val
+    if env_name in gen:
+        return gen[env_name]
+    if not allow_gen:
+        sys.exit(f"secret {env_name} not set in environment (use --generate-secrets for labs)")
+    gen[env_name] = secrets.token_urlsafe(24)
+    return gen[env_name]
+
+
+def openssl(*args, cwd=None):
+    subprocess.run(["openssl", *args], check=True, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def make_pki(pki: Path, cluster: str, hosts: list[tuple[str, str]]):
+    """Self-contained CA per cluster (replace with the enterprise CA in production)."""
+    d = pki / cluster
+    d.mkdir(parents=True, exist_ok=True)
+    if not (d / "ca.crt").exists():
+        openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3650",
+                "-subj", f"/CN=seaweedfs-{cluster}-ca", "-keyout", str(d / "ca.key"), "-out", str(d / "ca.crt"))
+    for host, ip in hosts + [("client", "127.0.0.1")]:
+        crt = d / f"{host}.crt"
+        if crt.exists():
+            continue
+        ext = d / f"{host}.ext"
+        ext.write_text(f"subjectAltName=DNS:{host},IP:{ip}\nextendedKeyUsage=serverAuth,clientAuth\n")
+        openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", f"/CN={host}",
+                "-keyout", str(d / f"{host}.key"), "-out", str(d / f"{host}.csr"))
+        openssl("x509", "-req", "-in", str(d / f"{host}.csr"), "-CA", str(d / "ca.crt"), "-CAkey", str(d / "ca.key"),
+                "-CAcreateserial", "-days", "825", "-extfile", str(ext), "-out", str(crt))
+    return d
+
+
+def security_toml(inv, cluster, host, certdir, jwt_key, admin_pw, trusted=""):
+    g = inv.g
+    sec = g["security"]
+    lines = ["# Generated by swctl", ""]
+    if sec.get("jwt_signing"):
+        lines += ["[jwt.signing]", f'key = "{jwt_key}"', "expires_after_seconds = 10", ""]
+    if sec.get("admin_auth", True):
+        lines += ["[admin]", 'user = "admin"', f'password = "{admin_pw}"', ""]
+    if sec.get("grpc_mtls"):
+        ca, crt, key = f"{certdir}/ca.crt", f"{certdir}/{host}.crt", f"{certdir}/{host}.key"
+        lines += ["[grpc]", f'ca = "{ca}"', ""]
+        for comp in ("master", "volume", "filer", "s3", "admin", "worker", "msg_broker"):
+            lines += [f"[grpc.{comp}]", f'cert = "{crt}"', f'key = "{key}"', ""]
+        lines += ["[grpc.client]", f'cert = "{crt}"', f'key = "{key}"', ""]
+    if trusted:
+        lines += ["[s3.trusted_proxies]", f'white_list = "{trusted}"', ""]
+    return "\n".join(lines)
+
+
+def s3_json(inv, gen, allow_gen):
+    ids = []
+    for ident in inv.g["s3"]["identities"]:
+        ids.append({"name": ident["name"],
+                    "credentials": [{"accessKey": ident["access_key"],
+                                     "secretKey": secret(inv, ident["secret_env"], gen, allow_gen)}],
+                    "actions": ident["actions"]})
+    return json.dumps({"identities": ids}, indent=2)
+
+
+def tiering_json(inv, test=False):
+    t = inv.g["tiering"]
+    quiet = 300 if test else t["quiet_for_seconds"]
+    rep = inv.g["master"]["default_replication"]
+    buckets = inv.g["s3"]["buckets"]
+    doc = {
+        "selectors": [{"match": ["**"], "volumeClass": "archive-data"}],   # protojson names verified on 4.48-enterprise
+        "profiles": [{
+            "name": "archive-hot-cold" + ("-test" if test else ""),
+            "landing": {"diskType": t["hot_disk"], "replication": rep},
+            "tiers": [{"name": "cold-ec",
+                       "when": {"quietForSeconds": quiet},
+                       "ec": {"diskType": t["cold_disk"], "dataShards": t["ec"]["data_shards"],
+                              "parityShards": t["ec"]["parity_shards"]}}],
+        }],
+        "bindings": [{"collectionPattern": b, "volumeClass": "archive-data",
+                      "profileName": "archive-hot-cold" + ("-test" if test else "")} for b in buckets],
+    }
+    return json.dumps(doc, indent=2)
+
+
+def ops_units(inv, cname):
+    """sw-canary (daemon, Prometheus /metrics) and sw-guard (systemd timer) for the replication source."""
+    mon = inv.g.get("monitoring") or {}
+    pairs = [(d, c) for d, c in inv.clusters.items() if c.get("replicate_from") == cname and c.get("data_movement")]
+    if not pairs:
+        return {}
+    dst, dcl = pairs[0]
+    bucket = dcl["data_movement"]["policies"][0]["source"].rstrip("/").split("/")[-1]
+    scheme = "https" if inv.g.get("s3", {}).get("https") else "http"
+    src_ep = f"{scheme}://{inv.clusters[cname].get('s3_vip') or inv.s3s(cname)[0]}"
+    dst_ep = f"{scheme}://{dcl.get('s3_vip') or inv.s3s(dst)[0]}"
+    can, gd = mon.get("canary", {}), mon.get("guard", {})
+    tools = "/opt/seaweedfs-deploy"
+    env = f"{inv.g['config_dir']}/ops.env"   # SRC_/DST_AWS_* + SW_ADMIN_PASSWORD_*, mode 0600, from vault
+    out = {"sw-canary.service": textwrap.dedent(f"""\
+        # Generated by swctl - end-to-end DR canary ({cname} -> {dst})
+        [Unit]
+        Description=SeaweedFS DR canary {cname}->{dst}
+        After=network-online.target
+        [Service]
+        User={inv.g.get('run_user', 'seaweedfs')}
+        EnvironmentFile={env}
+        ExecStart={tools}/bin/sw-canary --src {src_ep} --dst {dst_ep} --bucket {bucket} \\
+            --timeout {can.get('rpo_s', 60)} --interval {can.get('interval_s', 60)} --listen 0.0.0.0:{can.get('listen_port', 9340)}
+        Restart=always
+        RestartSec=10
+        [Install]
+        WantedBy=multi-user.target
+        """)}
+    if gd:
+        dl = (" --date-layout '" + gd['date_layout'].replace('%', '%%') + "'") if gd.get("date_layout") else ""   # systemd: % -> %%
+        out["sw-guard.service"] = textwrap.dedent(f"""\
+            # Generated by swctl - detect + remediate E-02/03/07/08/10 (see design doc v2.2 sec. 11)
+            [Unit]
+            Description=SeaweedFS guard ({cname})
+            [Service]
+            Type=oneshot
+            EnvironmentFile={env}
+            ExecStart={tools}/bin/sw-guard -i {tools}/inventory/{inv.path.name} --cluster {cname} \\
+                {'--fix ' if gd.get('fix') else ''}{'--sweep ' if gd.get('sweep', True) else ''}--rpo {can.get('rpo_s', 60)}{dl} --json \\
+                --state /var/lib/sw-guard/state.json
+            StandardOutput=append:/var/log/sw-guard.jsonl
+            """)
+        out["sw-guard.timer"] = textwrap.dedent("""\
+            [Unit]
+            Description=Run sw-guard every 5 minutes
+            [Timer]
+            OnBootSec=5min
+            OnUnitActiveSec=5min
+            [Install]
+            WantedBy=timers.target
+            """)
+    return out
+
+
+def prometheus_yml(inv):
+    jobs = {}
+    for cname in inv.clusters:
+        for s in inv.services(cname):
+            if s.metrics_port:
+                jobs.setdefault(s.kind, []).append({"targets": [f"{s.ip}:{s.metrics_port}"],
+                                                   "labels": {"cluster": cname, "host": s.host, "rack": s.rack}})
+    if inv.g.get("monitoring", {}).get("canary"):
+        port = inv.g["monitoring"]["canary"].get("listen_port", 9340)
+        for cname, cl in inv.clusters.items():
+            if any(c.get("replicate_from") == cname for c in inv.clusters.values()) and inv.admin_node(cname):
+                jobs.setdefault("canary", []).append({"targets": [f"{inv.admin_node(cname)['ip']}:{port}"],
+                                                      "labels": {"cluster": cname}})
+    cfg = {"global": {"scrape_interval": "15s", "evaluation_interval": "30s"},
+           "rule_files": ["seaweedfs-alerts.yml"],
+           "scrape_configs": [{"job_name": f"seaweedfs-{k}", "static_configs": v} for k, v in sorted(jobs.items())]}
+    return yaml.safe_dump(cfg, sort_keys=False)
+
+
+ALERTS = """\
+# Generated by swctl - SeaweedFS alert rules (tune thresholds to approved SLA)
+groups:
+- name: seaweedfs-availability
+  rules:
+  - alert: SeaweedFSTargetDown
+    expr: up{job=~"seaweedfs-.*"} == 0
+    for: 2m
+    labels: {severity: critical}
+    annotations: {summary: "{{ $labels.job }} on {{ $labels.host }} ({{ $labels.cluster }}) is down"}
+  - alert: SeaweedFSMasterQuorumAtRisk
+    expr: count by (cluster) (up{job="seaweedfs-master"} == 1) < 3
+    for: 1m
+    labels: {severity: warning}
+  - alert: SeaweedFSMasterQuorumLost
+    expr: count by (cluster) (up{job="seaweedfs-master"} == 1) < 2
+    for: 30s
+    labels: {severity: critical}
+  - alert: SeaweedFSS3GatewaysDegraded
+    expr: count by (cluster) (up{job="seaweedfs-s3"} == 1) < 2
+    for: 1m
+    labels: {severity: critical}
+- name: seaweedfs-dr-canary
+  rules:
+  - alert: SeaweedFSDRReplicationStalled          # E-08/E-10: the policy status alone is not trustworthy
+    expr: seaweedfs_dr_canary_last_success_age_seconds > RPO_SECONDS
+    for: 2m
+    labels: {severity: critical}
+    annotations: {summary: "No canary object reached DR for {{ $value }}s ({{ $labels.cluster }}); sw-guard should heal - check /var/log/sw-guard.jsonl"}
+  - alert: SeaweedFSDRCanaryMissing
+    expr: absent(seaweedfs_dr_canary_runs_total)
+    for: 10m
+    labels: {severity: warning}
+- name: seaweedfs-capacity
+  rules:
+  - alert: SeaweedFSDiskWarning
+    expr: (1 - SeaweedFS_volumeServer_resource{type="free"} / SeaweedFS_volumeServer_resource{type="all"}) > 0.70
+    for: 15m
+    labels: {severity: warning}
+  - alert: SeaweedFSDiskCritical
+    expr: (1 - SeaweedFS_volumeServer_resource{type="free"} / SeaweedFS_volumeServer_resource{type="all"}) > 0.80
+    for: 5m
+    labels: {severity: critical}
+- name: seaweedfs-s3
+  rules:
+  - alert: SeaweedFSS3ErrorRate
+    expr: sum by (cluster) (rate(SeaweedFS_s3_request_total{code=~"5.."}[5m])) / sum by (cluster) (rate(SeaweedFS_s3_request_total[5m])) > 0.01
+    for: 10m
+    labels: {severity: warning}
+- name: seaweedfs-dr
+  rules:
+  - alert: SeaweedFSDRReplicationLagOverRPO
+    # Enterprise Data Movement exposes policy lag; OSS filer.sync exposes the last synced offset.
+    # Replace RPO_SECONDS with the business-approved value.
+    expr: (time() - max by (cluster) (SeaweedFS_filerSync_sync_offset / 1e9)) > RPO_SECONDS
+    for: 5m
+    labels: {severity: critical}
+"""
+
+
+def render(inv: Inventory, allow_gen: bool):
+    out = inv.build_dir
+    g = inv.g
+    cfg = g["config_dir"]
+    user = g.get("run_user", "seaweedfs")
+    sec_file = out / "secrets.env"
+    gen = {}
+    if sec_file.exists():
+        for line in sec_file.read_text().splitlines():
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                gen[k] = v
+    out.mkdir(parents=True, exist_ok=True)
+    jwt_keys, admin_pw = {}, {}
+    for cname in inv.clusters:
+        jwt_keys[cname] = secret(inv, f"SW_JWT_KEY_{cname.upper()}", gen, allow_gen)
+        admin_pw[cname] = secret(inv, f"SW_ADMIN_PASSWORD_{cname.upper()}", gen, allow_gen)
+    s3cfg = s3_json(inv, gen, allow_gen)     # same identities on primary and DR (failover!)
+
+    pki_root = out / g["security"].get("pki_dir", "pki")
+    certdirs = {}
+    for cname, cl in inv.clusters.items():          # all CAs first: admin hosts need other clusters' certs
+        hosts = [(n["host"], n["ip"]) for n in cl["nodes"]]
+        certdirs[cname] = make_pki(pki_root, cname, hosts) if g["security"].get("grpc_mtls") else None
+    for cname, cl in inv.clusters.items():
+        certdir_src = certdirs[cname]
+        svcs = inv.services(cname)
+        by_host = {}
+        for s in svcs:
+            by_host.setdefault(s.host, []).append(s)
+        # client bundle for operators (weed shell) and tests
+        client = out / cname / "_client"
+        client.mkdir(parents=True, exist_ok=True)
+        if certdir_src:
+            for f in ("ca.crt", "client.crt", "client.key"):
+                shutil.copy2(certdir_src / f, client / f)
+        (client / "security.toml").write_text(
+            security_toml(inv, cname, "client", str(client), jwt_keys[cname], admin_pw[cname]))
+        (client / "cluster.json").write_text(json.dumps({
+            "masters": inv.masters(cname), "filers": inv.filers(cname), "s3": inv.s3s(cname),
+            "admin": f"{inv.admin_node(cname)['ip']}:{inv.port('admin', cluster=cname)}" if inv.admin_node(cname) else None},
+            indent=2))
+        for n in cl["nodes"]:
+            h = n["host"]
+            root = out / cname / h / "root"
+            if root.exists():
+                shutil.rmtree(root)
+            etc = root / cfg.lstrip("/")
+            etc.mkdir(parents=True)
+            P = lambda x: inv.p(cname, h, x)  # noqa: E731
+            certdir = P(cfg + "/tls")
+            if certdir_src:
+                (etc / "tls").mkdir()
+                for f in ("ca.crt", f"{h}.crt", f"{h}.key"):
+                    shutil.copy2(certdir_src / f, etc / "tls" / f)
+                os.chmod(etc / "tls" / f"{h}.key", 0o600)
+            (etc / "seaweed.env").write_text(
+                f"# Generated by swctl\nSEAWEED_LICENSE={P(g['license_file'])}\nGOMAXPROCS=0\n")
+            (etc / "security.toml").write_text(
+                security_toml(inv, cname, h, certdir, jwt_keys[cname], admin_pw[cname]))
+            os.chmod(etc / "security.toml", 0o640)
+            roles = n["roles"]
+            if "filer" in roles:
+                (etc / "filer.toml").write_text(filer_toml(inv, cname, h))
+            if "s3" in roles:
+                (etc / "s3.json").write_text(s3cfg)
+                os.chmod(etc / "s3.json", 0o640)
+            if "admin" in roles and g["edition"] == "enterprise" and g["security"].get("grpc_mtls"):
+                # Data Movement workers on this (source) admin host need client TLS for each target cluster
+                for other, ocl in inv.clusters.items():
+                    if ocl.get("replicate_from") == cname or (cl.get("replicate_from") == other):
+                        d = etc / "tls" / f"target-{other}"
+                        d.mkdir(parents=True, exist_ok=True)
+                        for f in ("ca.crt", "client.crt", "client.key"):
+                            shutil.copy2(pki_root / other / f, d / f)
+                        os.chmod(d / "client.key", 0o600)
+            if "filer_sync" in roles:
+                src = cl["replicate_from"]
+                src_cert = pki_root / src
+                (etc / "tls" / "source").mkdir(parents=True, exist_ok=True)
+                if g["security"].get("grpc_mtls"):
+                    for f in ("ca.crt", "client.crt", "client.key"):
+                        shutil.copy2(src_cert / f, etc / "tls" / "source" / f)
+                    os.chmod(etc / "tls" / "source" / "client.key", 0o600)
+                (etc / "sync-source-security.toml").write_text(
+                    security_toml(inv, src, "client", P(cfg + "/tls/source"), jwt_keys[src], admin_pw[src]))
+            units = root / "etc/systemd/system"
+            units.mkdir(parents=True)
+            for s in by_host.get(h, []):
+                (etc / f"{s.name}.env").write_text(
+                    "# Generated by swctl\nWEED_ARGS=\"" + " ".join(s.args) + "\"\n")
+                rw = sorted({P(g["data_root"])} | {P(d["path"]) for d in n.get("disks", [])})
+                after = "seaweed-master.service" if s.kind != "master" and any(
+                    x.kind == "master" for x in by_host[h]) else ""
+                (units / f"{s.name}.service").write_text(UNIT_TMPL.format(
+                    inventory=inv.path.name, kind=s.kind, cluster=cname, host=h, after=after, requires="",
+                    user=user, cfg=P(cfg), name=s.name, weed=g["weed_binary"], rw=" ".join(rw)))
+            if "admin" in roles and g.get("monitoring"):
+                for fn, txt in ops_units(inv, cname).items():
+                    (units / fn).write_text(txt)
+            (out / cname / h / "services.json").write_text(json.dumps(
+                [{"name": s.name, "kind": s.kind, "phase": s.phase, "ip": s.ip, "http": s.http_port,
+                  "grpc": s.grpc_port, "metrics": s.metrics_port, "args": s.args} for s in by_host.get(h, [])],
+                indent=2))
+        # cluster-level artefacts
+        cdir = out / cname / "_cluster"
+        cdir.mkdir(parents=True, exist_ok=True)
+        (cdir / "tiering.json").write_text(tiering_json(inv))
+        (cdir / "tiering-test.json").write_text(tiering_json(inv, test=True))
+        (cdir / "f5-pool.txt").write_text(f5_text(inv, cname))
+        (cdir / "port-matrix.csv").write_text(port_matrix(inv, cname))
+        if cl.get("role") == "standby":
+            (cdir / "data-movement.md").write_text(data_movement_md(inv, cname))
+    mon = out / "monitoring"
+    mon.mkdir(exist_ok=True)
+    (mon / "prometheus.yml").write_text(prometheus_yml(inv))
+    (mon / "seaweedfs-alerts.yml").write_text(ALERTS.replace(
+        "RPO_SECONDS", str(inv.sla.get("rpo_seconds") or 900)))
+    if gen:
+        sec_file.write_text("# generated secrets - store in your vault, never commit\n" +
+                            "\n".join(f"{k}={v}" for k, v in gen.items()) + "\n")
+        os.chmod(sec_file, 0o600)
+    log(f"rendered {sum(len(inv.services(c)) for c in inv.clusters)} services for "
+        f"{len(inv.clusters)} clusters into {out}", "ok")
+
+
+def filer_toml(inv, cname, host):
+    g = inv.g
+    st = g["filer"]["store"]
+    if st == "leveldb2":
+        return (f"# Generated by swctl\n[leveldb2]\nenabled = true\n"
+                f'dir = "{inv.p(cname, host, g["data_root"] + "/filer/filerldb2")}"\n')
+    if st == "postgres2":
+        # one HA PostgreSQL per data center (Patroni/pg_auto_failover VIP); per-cluster override wins
+        p = dict(g["filer"]["postgres2"])
+        p.update(inv.clusters[cname].get("filer_store") or {})
+        tls = ""
+        if p.get("sslmode", "verify-full") == "verify-full":
+            tls = f'sslrootcert = "{p.get("sslrootcert", "/etc/ssl/certs/pg-ca.crt")}"\n'
+        return textwrap.dedent(f"""\
+            # Generated by swctl - shared metadata store for all filers of this cluster
+            [postgres2]
+            enabled = true
+            createTable = \"\"\"
+              CREATE TABLE IF NOT EXISTS "%s" (
+                dirhash   BIGINT,
+                name      VARCHAR(65535),
+                directory VARCHAR(65535),
+                meta      bytea,
+                PRIMARY KEY (dirhash, name)
+              );
+            \"\"\"
+            hostname = "{p['hostname']}"
+            port = {p['port']}
+            username = "{p['username']}"
+            password = "{os.environ.get(p['password_env'], 'SET_' + p['password_env'])}"
+            database = "{p['database']}"
+            schema = ""
+            sslmode = "{p.get('sslmode', 'verify-full')}"
+            connection_max_idle = {p.get('max_idle', 50)}
+            connection_max_open = {p.get('max_open', 100)}
+            connection_max_lifetime_seconds = 300
+            pgbouncer_compatible = {str(p.get('pgbouncer', False)).lower()}
+            enableUpsert = true
+            upsertQuery = \"\"\"
+              INSERT INTO "%[1]s" (dirhash, name, directory, meta)
+                VALUES($1, $2, $3, $4)
+                ON CONFLICT (dirhash, name) DO UPDATE SET
+                  directory=EXCLUDED.directory,
+                  meta=EXCLUDED.meta
+            \"\"\"
+            """) + tls
+    return f"# Generated by swctl\n[{st}]\nenabled = true\n"
+
+
+def f5_text(inv, cname):
+    cl = inv.clusters[cname]
+    pool = "\n".join(f"  member {a}" for a in inv.s3s(cname))
+    return textwrap.dedent(f"""\
+        F5 LTM configuration for {cl.get('s3_vip')} ({cname})
+        ---------------------------------------------------------------
+        Virtual server : {cl.get('s3_vip')}:443  (TLS terminate, SNAT automap)
+        Pool           : seaweedfs-s3-{cname}   (least-connections, slow-ramp 30s)
+        {pool}
+        Monitor 1 (liveness) : HTTP GET /healthz  -> expect 200 (interval 5s, timeout 16s)
+        Monitor 2 (deep)     : S3 HEAD /{inv.g['s3']['buckets'][0]}/.healthcheck/canary signed with the
+                               read-only 'monitor' identity -> expect 200. /healthz alone
+                               does NOT detect a gateway that lost all filers.
+        Pool min-up    : 2 members (else mark VIP down -> GSLB fails over)
+        Timeouts       : idle 300s (large multipart uploads), request body >= 5 GiB allowed
+        X-Forwarded-For: insert; add F5 self-IPs to [s3.trusted_proxies] white_list
+        """)
+
+
+def port_matrix(inv, cname):
+    rows = ["host,ip,service,http,grpc,metrics"]
+    for s in inv.services(cname):
+        rows.append(f"{s.host},{s.ip},{s.name},{s.http_port or ''},{s.grpc_port or ''},{s.metrics_port or ''}")
+    return "\n".join(rows) + "\n"
+
+
+def data_movement_md(inv, cname):
+    cl = inv.clusters[cname]
+    src = cl["replicate_from"]
+    dr_filer = inv.filers(cname)[0]
+    grpc = dr_filer.split(":")[0] + ":" + str(int(dr_filer.split(":")[1]) + GRPC_OFFSET)
+    paths = cl.get("replication_paths", ["/buckets"])
+    return textwrap.dedent(f"""\
+        # Enterprise Data Movement: {src} -> {cname}
+        Configure on the {src} Admin UI (http://{inv.admin_node(src)['ip']}:{inv.port('admin', cluster=src)}).
+
+        Target  : name={src}-to-{cname}  type=SeaweedFS Cluster  filer gRPC={grpc}  mTLS=on
+                  (fallback gRPC endpoints: {', '.join(f.split(':')[0] + ':' + str(int(f.split(':')[1]) + GRPC_OFFSET) for f in inv.filers(cname)[1:])})
+        Policies:
+        """) + "".join(
+        f"  - name={p.strip('/').replace('/', '-')}-{src}-to-{cname} source={p} dest={p} mode=CONTINUOUS "
+        f"initial_snapshot=ON delete_propagation=ON bandwidth_cap=<set>\n" for p in paths) + textwrap.dedent(f"""\
+        Backup policy (separate target, e.g. object-lock S3 or 3rd cluster):
+          - mode=BACKUP delete_propagation=OFF retention=<per legal hold policy>
+        Enable plugin job type `data_movement`; run >= 2 workers on the {src} admin host.
+        OSS fallback (tested in the lab): seaweed-filer-sync service on the {cname} side
+          weed filer.sync -a <{src} filer> -b <{cname} filer> -a.path=P -b.path=P -isActivePassive
+        """)
+
+
+# --------------------------------------------------------------------------- #
+# Transports / runtimes
+# --------------------------------------------------------------------------- #
+def _alive(pid: int) -> bool:
+    """True if pid exists and is not a zombie (reaps our own children)."""
+    try:
+        if os.waitpid(pid, os.WNOHANG)[0] == pid:
+            return False
+    except ChildProcessError:
+        pass
+    try:
+        os.kill(pid, 0)
+        return Path(f"/proc/{pid}/stat").read_text().split()[2] != "Z"
+    except (ProcessLookupError, FileNotFoundError, PermissionError):
+        return False
+
+
+class Runner:
+    def __init__(self, inv: Inventory, dry=False):
+        self.inv, self.dry = inv, dry
+
+    def _ssh(self, host_ip, cmd, input_bytes=None, check=True):
+        s = self.inv.g["ssh"]
+        full = ["ssh", *shlex.split(s.get("options", "")), f"{s['user']}@{host_ip}", cmd]
+        if self.dry:
+            log("DRY " + " ".join(shlex.quote(x) for x in full), "info")
+            return subprocess.CompletedProcess(full, 0, b"", b"")
+        return subprocess.run(full, input=input_bytes, capture_output=True, check=check)
+
+    def sudo(self):
+        return "sudo " if self.inv.g["ssh"].get("sudo") else ""
+
+    # ---- push rendered overlay -------------------------------------------- #
+    def push(self, cluster, node):
+        src = self.inv.build_dir / cluster / node["host"] / "root"
+        if self.inv.local:
+            dst = Path(self.inv.prefix(cluster, node["host"]))
+            dst.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+            for d in node.get("disks", []):
+                Path(self.inv.p(cluster, node["host"], d["path"])).mkdir(parents=True, exist_ok=True)
+            Path(self.inv.p(cluster, node["host"], self.inv.g["data_root"])).mkdir(parents=True, exist_ok=True)
+            return
+        import io
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            tf.add(src, arcname=".")
+        u = self.inv.g.get("run_user", "seaweedfs")
+        cfg = self.inv.g["config_dir"]
+        self._ssh(node["ip"], f"{self.sudo()}tar -xzf - -C / --no-same-owner && "
+                  f"{self.sudo()}chown -R root:{u} {cfg} && {self.sudo()}chmod 750 {cfg} && "
+                  f"{self.sudo()}systemctl daemon-reload", buf.getvalue())
+
+    # ---- lifecycle ---------------------------------------------------------- #
+    def _local_paths(self, s: Service):
+        pre = Path(self.inv.prefix(s.cluster, s.host))
+        return pre / "run" / f"{s.name}.pid", pre / "log" / f"{s.name}.log"
+
+    def start(self, s: Service):
+        if self.inv.local:
+            pid, logf = self._local_paths(s)
+            if self.is_running(s):
+                return
+            pid.parent.mkdir(parents=True, exist_ok=True)
+            logf.parent.mkdir(parents=True, exist_ok=True)
+            cfg = Path(self.inv.p(s.cluster, s.host, self.inv.g["config_dir"]))
+            env_args = (cfg / f"{s.name}.env").read_text().split("WEED_ARGS=", 1)[1].strip().strip('"')
+            env = dict(os.environ, SEAWEED_LICENSE=self.inv.p(s.cluster, s.host, self.inv.g["license_file"]))
+            with open(logf, "ab") as lf:
+                p = subprocess.Popen([self.inv.g["weed_binary"], *shlex.split(env_args)], cwd=cfg, env=env,
+                                     stdout=lf, stderr=subprocess.STDOUT, start_new_session=True)
+            pid.write_text(str(p.pid))
+            return
+        self._ssh(s.ip, f"{self.sudo()}systemctl enable --now {s.name}.service")
+
+    def stop(self, s: Service, hard=False):
+        if self.inv.local:
+            pid, _ = self._local_paths(s)
+            if not pid.exists():
+                return
+            p = int(pid.read_text())
+            try:
+                os.killpg(p, signal.SIGKILL if hard else signal.SIGTERM)
+                for _ in range(150):                 # volume servers honour -preStopSeconds (10s)
+                    if not _alive(p):
+                        break
+                    time.sleep(0.1)
+                else:
+                    os.killpg(p, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            pid.unlink(missing_ok=True)
+            return
+        self._ssh(s.ip, f"{self.sudo()}systemctl {'kill -s KILL' if hard else 'stop'} {s.name}.service", check=False)
+
+    def is_running(self, s: Service) -> bool:
+        if self.inv.local:
+            pid, _ = self._local_paths(s)
+            if not pid.exists():
+                return False
+            return _alive(int(pid.read_text()))
+        r = self._ssh(s.ip, f"systemctl is-active {s.name}.service", check=False)
+        return r.returncode == 0
+
+
+# --------------------------------------------------------------------------- #
+# Health gates
+# --------------------------------------------------------------------------- #
+def http_get(url, timeout=3):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except Exception as e:  # noqa: BLE001
+        return 0, str(e).encode()
+
+
+def wait_until(fn, timeout, interval=1.0, desc=""):
+    t0 = time.time()
+    last = None
+    while time.time() - t0 < timeout:
+        try:
+            ok, last = fn()
+            if ok:
+                return True, time.time() - t0, last
+        except Exception as e:  # noqa: BLE001
+            last = str(e)
+        time.sleep(interval)
+    return False, time.time() - t0, last
+
+
+def gate_master(inv, cluster, timeout=90):
+    ms = inv.masters(cluster)
+
+    def check():
+        leaders = set()
+        for m in ms:
+            code, body = http_get(f"http://{m}/cluster/status")
+            if code != 200:
+                return False, f"{m} -> {code}"
+            j = json.loads(body)
+            leaders.add(j.get("Leader"))
+            peers = j.get("Peers") or []
+            if j.get("IsLeader") and len(peers) + 1 < len(ms):
+                return False, f"leader sees {len(peers)} peers"
+        return (len(leaders) == 1 and None not in leaders and "" not in leaders), f"leaders={leaders}"
+    return wait_until(check, timeout, desc="master quorum")
+
+
+def topology(inv, cluster):
+    for m in inv.masters(cluster):
+        code, body = http_get(f"http://{m}/dir/status")
+        if code == 200:
+            return json.loads(body)["Topology"]
+    return None
+
+
+def gate_volume(inv, cluster, timeout=90):
+    expected = {}
+    for n in inv.nodes(cluster):
+        for r in ("volume_hot", "volume_cold"):
+            if r in n["roles"]:
+                expected[f"{n['ip']}:{inv.port(r, cluster=cluster)}"] = n["rack"]
+
+    def check():
+        topo = topology(inv, cluster)
+        if not topo:
+            return False, "no topology"
+        seen = {}
+        for dc in topo.get("DataCenters") or []:
+            if dc["Id"] != inv.clusters[cluster]["datacenter"]:
+                return False, f"unexpected DC {dc['Id']}"
+            for rk in dc.get("Racks") or []:
+                for dn in rk.get("DataNodes") or []:
+                    seen[dn["Url"]] = rk["Id"]
+        missing = {k: v for k, v in expected.items() if seen.get(k) != v}
+        return not missing, f"missing/mis-racked: {missing}" if missing else f"{len(seen)} volume servers"
+    return wait_until(check, timeout)
+
+
+def gate_http(inv, cluster, kind, timeout=60):
+    svcs = [s for s in inv.services(cluster) if s.kind == kind and s.health_path]
+
+    def check():
+        bad = []
+        for s in svcs:
+            code, _ = http_get(f"http://{s.addr}{s.health_path}")
+            if code != 200:
+                bad.append(f"{s.host}:{code}")
+        return not bad, bad or f"{len(svcs)} healthy"
+    return wait_until(check, timeout)
+
+
+def gate_running(inv, runner, cluster, kind, timeout=20):
+    svcs = [s for s in inv.services(cluster) if s.kind == kind]
+
+    def check():
+        down = [s.host + "/" + s.name for s in svcs if not runner.is_running(s)]
+        return not down, down or "running"
+    return wait_until(check, timeout)
+
+
+GATES = {
+    "master": lambda inv, r, c: gate_master(inv, c),
+    "volume": lambda inv, r, c: gate_volume(inv, c),
+    "filer": lambda inv, r, c: gate_http(inv, c, "filer"),
+    "s3": lambda inv, r, c: gate_http(inv, c, "s3"),
+    "admin": lambda inv, r, c: gate_running(inv, r, c, "admin"),
+    "worker": lambda inv, r, c: gate_running(inv, r, c, "worker"),
+    "sync": lambda inv, r, c: gate_running(inv, r, c, "filer_sync"),
+}
+
+
+# --------------------------------------------------------------------------- #
+# weed shell wrapper
+# --------------------------------------------------------------------------- #
+def weed_shell(inv, cluster, commands: str, timeout=300, check=False):
+    client = inv.build_dir / cluster / "_client"
+    m = inv.masters(cluster)
+    cmd = [inv.g["weed_binary"], "shell", f"-master={','.join(m)}"]
+    r = subprocess.run(cmd, input=commands if commands.endswith("\n") else commands + "\n", text=True,
+                       capture_output=True, cwd=client, timeout=timeout)
+    if check and r.returncode != 0:
+        raise RuntimeError(r.stderr)
+    return r.stdout + r.stderr
+
+
+# --------------------------------------------------------------------------- #
+# Commands
+# --------------------------------------------------------------------------- #
+def cmd_validate(inv, a):
+    res = validate(inv)
+    width = max(len(r[1]) for r in res)
+    for lvl, chk, msg in res:
+        col = {"PASS": C["ok"], "WARN": C["warn"], "FAIL": C["fail"]}[lvl]
+        print(f"{col}{lvl:4}{C['end']}  {chk:<{width}}  {msg}")
+    fails = sum(1 for r in res if r[0] == "FAIL")
+    print(f"\n{len(res)} checks: {sum(1 for r in res if r[0]=='PASS')} pass, "
+          f"{sum(1 for r in res if r[0]=='WARN')} warn, {fails} fail")
+    if a.json:
+        Path(a.json).write_text(json.dumps([dict(level=l, check=c, message=m) for l, c, m in res], indent=2))
+    return 1 if fails and a.strict else 0
+
+
+def cmd_render(inv, a):
+    render(inv, a.generate_secrets)
+    return 0
+
+
+def cmd_plan(inv, a):
+    for cname in clusters_arg(inv, a):
+        print(f"\n# cluster {cname}")
+        for ph in PHASES:
+            svcs = [s for s in inv.services(cname) if s.phase == ph]
+            if svcs:
+                print(f"  phase {ph:7} -> {len(svcs)} service(s); gate: {GATES[ph].__doc__ or ph}")
+                for s in svcs:
+                    print(f"      {s.host:22} {s.name:22} {' '.join(s.args[:1])} ...")
+    return 0
+
+
+def clusters_arg(inv, a):
+    return [a.cluster] if getattr(a, "cluster", None) else list(inv.clusters)
+
+
+def cmd_install(inv, a):
+    """Push the weed binary + OS prerequisites (ssh transport)."""
+    r = Runner(inv, a.dry_run)
+    binary = Path(a.binary).resolve()
+    digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+    for cname in clusters_arg(inv, a):
+        for n in inv.nodes(cname):
+            if inv.local:
+                log(f"{n['host']}: local transport - using {inv.g['weed_binary']}", "info")
+                continue
+            u = inv.g.get("run_user", "seaweedfs")
+            script = NODE_PREP.format(user=u, cfg=inv.g["config_dir"], data=inv.g["data_root"],
+                                      disks=" ".join(d["path"] for d in n.get("disks", [])),
+                                      weed=inv.g["weed_binary"], sha=digest)
+            r._ssh(n["ip"], f"cat > /tmp/weed.new", binary.read_bytes())
+            r._ssh(n["ip"], f"{r.sudo()}bash -s", script.encode())
+            log(f"{cname}/{n['host']}: binary {digest[:12]} installed, OS prepared", "ok")
+    return 0
+
+
+NODE_PREP = r"""
+set -euo pipefail
+id {user} >/dev/null 2>&1 || useradd --system --home /var/lib/seaweedfs --shell /usr/sbin/nologin {user}
+install -d -o root -g {user} -m 0750 {cfg}
+install -d -o {user} -g {user} -m 0750 {data} /var/lib/seaweedfs
+for d in {disks}; do
+  mountpoint -q "$d" || {{ echo "FATAL: $d is not a mount point"; exit 2; }}
+  chown {user}:{user} "$d"
+done
+echo "{sha}  /tmp/weed.new" | sha256sum -c -
+install -D -m 0755 /tmp/weed.new {weed} && rm -f /tmp/weed.new
+cat >/etc/sysctl.d/90-seaweedfs.conf <<'EOF'
+fs.file-max = 2097152
+net.core.somaxconn = 4096
+net.ipv4.tcp_max_syn_backlog = 8192
+net.ipv4.ip_local_port_range = 10240 65000
+vm.swappiness = 1
+EOF
+sysctl --system >/dev/null
+timedatectl show -p NTPSynchronized --value | grep -q yes || echo "WARN: clock not NTP-synchronized"
+{weed} version
+"""
+
+
+def cmd_deploy(inv, a):
+    r = Runner(inv, a.dry_run)
+    # 'sync' (DR replication) is deliberately excluded from the default run: it must start only
+    # after the DR cluster is bootstrapped (bucket + landing rule), otherwise the seed lands
+    # before the placement rule exists. Run: deploy -> bootstrap -> deploy --phase sync
+    phases = a.phase.split(",") if a.phase else [p for p in PHASES if p != "sync"]
+    report = []
+    for cname in clusters_arg(inv, a):
+        log(f"deploy cluster {cname} ({inv.clusters[cname].get('role')})", "step")
+        for n in inv.nodes(cname):
+            r.push(cname, n)
+        log(f"pushed rendered configs to {len(inv.nodes(cname))} nodes", "ok")
+        for ph in phases:
+            svcs = [s for s in inv.services(cname) if s.phase == ph]
+            if not svcs:
+                continue
+            t0 = time.time()
+            for s in svcs:
+                r.start(s)
+                if ph == "filer" and not a.dry_run and s.health_path:
+                    # Filers must join one at a time: a new filer bootstraps its metadata from an
+                    # already-registered peer and exits FATAL if that peer's gRPC is not up yet
+                    # (reproduced in the lab with a parallel start).
+                    wait_until(lambda s=s: (http_get(f"http://{s.addr}{s.health_path}")[0] == 200, None), 60)
+            if a.dry_run:
+                continue
+            ok, dt, detail = GATES[ph](inv, r, cname)
+            dt = time.time() - t0
+            report.append({"cluster": cname, "phase": ph, "services": len(svcs), "ok": ok,
+                           "seconds": round(dt, 1), "detail": str(detail)})
+            log(f"phase {ph:7} {len(svcs):2} svc  gate {'PASS' if ok else 'FAIL'} in {dt:5.1f}s  {detail}",
+                "ok" if ok else "fail")
+            if not ok:
+                log("stopping: fix the failed gate before continuing (later phases depend on it)", "fail")
+                write_report(inv, a, report)
+                return 2
+    write_report(inv, a, report)
+    return 0
+
+
+def write_report(inv, a, report):
+    if getattr(a, "report", None):
+        Path(a.report).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.report).write_text(json.dumps(report, indent=2))
+
+
+def vol_index(inv, cluster):
+    for m in inv.masters(cluster):
+        code, body = http_get(f"http://{m}/vol/status")
+        if code == 200:
+            idx = {}
+            for dc, racks in json.loads(body)["Volumes"]["DataCenters"].items():
+                for rack, nodes in racks.items():
+                    for node, vols in nodes.items():
+                        for v in vols or []:
+                            idx[v["Id"]] = (v.get("DiskType") or "hdd", v.get("VolumeClass", ""), v.get("Collection", ""))
+            return idx
+    return {}
+
+
+def verify_landing(inv, cluster, bucket, want_disk, want_class=None, timeout=900):
+    """Write probe objects through a filer until one lands on the landing tier (and volume class).
+    Enterprise distributes a newly applied tiering policy to filers asynchronously; writes made
+    before it arrives land unclassed on the default disk and are never governed by the binding."""
+    filer = inv.filers(cluster)[0]
+    t0, n = time.time(), 0
+    last = None
+    while time.time() - t0 < timeout:
+        n += 1
+        url = f"http://{filer}/buckets/{bucket}/.swctl-landing-probe/{n}"
+        try:
+            req = urllib.request.Request(url, data=os.urandom(8192), method="PUT")
+            urllib.request.urlopen(req, timeout=10).read()
+            code, body = http_get(url + "?metadata=true")
+            vid = int(json.loads(body)["chunks"][0]["file_id"].split(",")[0])
+            last = vol_index(inv, cluster).get(vid)
+        except Exception as e:  # noqa: BLE001
+            last = str(e)
+        finally:
+            try:
+                urllib.request.urlopen(urllib.request.Request(url, method="DELETE"), timeout=10)
+            except Exception:  # noqa: BLE001
+                pass
+        if isinstance(last, tuple) and last[0] == want_disk and (want_class is None or last[1] == want_class):
+            return True, round(time.time() - t0), n, last
+        time.sleep(10)
+    return False, round(time.time() - t0), n, last
+
+
+def cmd_bootstrap(inv, a):
+    for cname in clusters_arg(inv, a):
+        log(f"bootstrap {cname}", "step")
+        t = inv.g["tiering"]
+        rep = inv.g["master"]["default_replication"]
+        cmds = ["lock"]
+        for b in inv.g["s3"]["buckets"]:
+            cmds.append(f"s3.bucket.create -name {b}")
+            if inv.g["edition"] != "enterprise":
+                # OSS: pin the landing tier with a filer path rule. Enterprise: the tiering
+                # profile 'landing' does this server-side (tiering.apply below).
+                cmds.append(f"fs.configure -locationPrefix=/buckets/{b}/ -disk={t['hot_disk']} "
+                            f"-replication={rep} -apply")
+        cmds.append("unlock")
+        out = weed_shell(inv, cname, "\n".join(cmds))
+        log(out.strip().replace("\n", "\n    "))
+        if inv.g["edition"] == "enterprise":
+            tj = inv.build_dir / cname / "_cluster" / "tiering.json"
+            out = weed_shell(inv, cname, f"tiering.apply -file={tj}\n")
+            log(out.strip())
+            if "applied tiering config" not in out:
+                log("tiering.apply failed - fix the policy before opening traffic", "fail")
+                return 2
+        # Gate: do not open traffic until new writes really land on the hot tier (and class)
+        want_class = "archive-data" if inv.g["edition"] == "enterprise" else None
+        for b in inv.g["s3"]["buckets"]:
+            ok, secs, n, last = verify_landing(inv, cname, b, t["hot_disk"], want_class,
+                                               timeout=getattr(a, "landing_timeout", 900))
+            log(f"landing gate {b}: {'PASS' if ok else 'FAIL'} after {secs}s / {n} probe(s): {last}",
+                "ok" if ok else "fail")
+            if not ok:
+                return 2
+    return 0
+
+
+def cmd_verify(inv, a):
+    r = Runner(inv)
+    rc = 0
+    for cname in clusters_arg(inv, a):
+        log(f"verify {cname}", "step")
+        for ph in PHASES:
+            if not [s for s in inv.services(cname) if s.phase == ph]:
+                continue
+            ok, dt, detail = GATES[ph](inv, r, cname) if ph != "master" else gate_master(inv, cname, 10)
+            if ph == "sync" and not ok:
+                log(f"{ph:7} not running (start with: deploy --phase sync, after bootstrap)", "warn")
+                continue
+            log(f"{ph:7} {detail}", "ok" if ok else "fail")
+            rc |= 0 if ok else 1
+        for s in inv.services(cname):
+            if s.metrics_port and s.kind != "filer_sync":
+                code, _ = http_get(f"http://{s.ip}:{s.metrics_port}/metrics")
+                if code != 200:
+                    log(f"metrics {s.host}/{s.name}:{s.metrics_port} -> {code}", "fail")
+                    rc |= 1
+        log("metrics endpoints checked", "ok")
+    return rc
+
+
+def cmd_status(inv, a):
+    r = Runner(inv)
+    for cname in clusters_arg(inv, a):
+        print(f"\n{cname}")
+        for s in inv.services(cname):
+            up = r.is_running(s)
+            print(f"  {C['ok'] if up else C['fail']}{'UP  ' if up else 'DOWN'}{C['end']} {s.host:22} {s.name:22} "
+                  f"{s.addr if s.http_port else ''}")
+    return 0
+
+
+def select(inv, a):
+    out = []
+    for cname in clusters_arg(inv, a):
+        for s in inv.services(cname):
+            if a.host and s.host not in a.host.split(","):
+                continue
+            if a.kind and s.kind not in a.kind.split(","):
+                continue
+            out.append(s)
+    return out
+
+
+def cmd_start(inv, a):
+    r = Runner(inv, a.dry_run)
+    for s in select(inv, a):
+        r.start(s)
+        log(f"started {s.cluster}/{s.host}/{s.name}", "ok")
+    return 0
+
+
+def cmd_stop(inv, a):
+    r = Runner(inv, a.dry_run)
+    svcs = select(inv, a)
+    # reverse dependency order
+    import concurrent.futures as cf
+    for ph in reversed(PHASES):
+        batch = [s for s in svcs if s.phase == ph]
+        with cf.ThreadPoolExecutor(max(1, len(batch))) as ex:
+            list(ex.map(lambda s: r.stop(s, hard=a.kill), batch))
+        for s in batch:
+            log(f"{'killed' if a.kill else 'stopped'} {s.cluster}/{s.host}/{s.name}", "ok")
+    return 0
+
+
+def _admin_api(inv, cluster):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from seaweed_admin_api import AdminAPI
+    adm = inv.admin_node(cluster)
+    user = pw = None
+    if inv.g["security"].get("admin_auth", True):
+        user = "admin"
+        pw = os.environ.get(f"SW_ADMIN_PASSWORD_{cluster.upper()}")
+    return AdminAPI(f"http://{adm['ip']}:{inv.port('admin', cluster=cluster)}", user, pw)
+
+
+def dm_target(inv, src, dst, name):
+    f = inv.filers(dst)[0]
+    host, port = f.split(":")
+    tls = inv.p(src, inv.admin_node(src)["host"], inv.g["config_dir"] + f"/tls/target-{dst}")
+    return {"name": name, "kind": "cluster", "cluster": {
+        "filerGrpcAddress": f"{host}:{int(port) + GRPC_OFFSET}", "path": "", "replication": "", "collection": "",
+        "ttlSec": 0, "diskType": "", "filerProxy": False, "securitySection": "",
+        "caFile": f"{tls}/ca.crt" if inv.g["security"].get("grpc_mtls") else "",
+        "certFile": f"{tls}/client.crt" if inv.g["security"].get("grpc_mtls") else "",
+        "keyFile": f"{tls}/client.key" if inv.g["security"].get("grpc_mtls") else "", "serverName": ""}}
+
+
+def dm_policy(p, target):
+    return {"name": p["name"], "enabled": p.get("enabled", True), "sourcePath": p["source"], "excludePaths": [],
+            "targetName": p.get("target", target), "targetBucket": "", "targetDirectory": p["dest"],
+            "mode": p.get("mode", "continuous"), "propagateDeletes": p.get("propagate_deletes", True),
+            "initialSnapshot": p.get("initial_snapshot", True), "startFromTsNs": str(p.get("start_from_ts_ns", 0)),
+            "incremental": False, "retentionDays": p.get("retention_days", 0),
+            "bytesPerSecond": p.get("bytes_per_second", 0), "fileConcurrency": 0, "chunkConcurrency": 0,
+            "bidirectional": False, "mirrorBucketOps": False}
+
+
+def cmd_dm(inv, a):
+    """Enterprise Data Movement + Volume Tiering workers via the Admin REST API."""
+    rc = 0
+    for dst, cl in inv.clusters.items():
+        dmc = cl.get("data_movement")
+        if not dmc:
+            continue
+        src = cl["replicate_from"]
+        api = _admin_api(inv, src)
+        if a.action == "enable":
+            # NOTE: do not enable volume_maintenance while tiering transitions are pending - in the lab it
+            # re-replicated the leftover SSD copy of a volume that had just been erasure-coded.
+            for jt, iv in (("data_movement", 1), ("volume_tiering", 10)):
+                code, _ = api.enable_job(jt, detection_interval_minutes=iv)
+                log(f"{src}: enable job {jt} -> HTTP {code}", "ok" if code == 200 else "fail")
+            # E-08: with the defaults (24 h execution timeout) a job orphaned by a dead worker blocks the
+            # policy for up to a day. Bound it (inventory global.data_movement_tuning).
+            tun = inv.g.get("data_movement_tuning") or {}
+            if tun:
+                adm_rt = {k: v for k, v in tun.items() if k in ("execution_timeout_seconds",
+                                                                 "job_type_max_runtime_seconds")}
+                wrk = {k: {"int64_value": str(v)} for k, v in tun.items() if k not in adm_rt}
+                code1, _ = api.enable_job("data_movement", detection_interval_minutes=1, **adm_rt)
+                code2, _ = api.set_values("data_movement", worker=wrk)
+                log(f"{src}: data_movement tuning {tun} -> HTTP {code1}/{code2}",
+                    "ok" if code1 == code2 == 200 else "fail")
+        elif a.action == "apply":
+            code, r = api.put_target(dm_target(inv, src, dst, dmc["target"]))
+            log(f"{src}: target {dmc['target']} -> {code} {r.get('error', '')}", "ok" if code == 200 else "fail")
+            for b in dmc.get("backup", []):
+                code, r = api.put_target(dm_target(inv, src, dst, b["target"]))
+            for p in dmc.get("policies", []) + dmc.get("backup", []):
+                code, r = api.put_policy(dm_policy(p, dmc["target"]))
+                log(f"{src}: policy {p['name']} ({p.get('mode', 'continuous')}) -> {code} {r.get('error', '')}",
+                    "ok" if code == 200 else "fail")
+                rc |= 0 if code == 200 else 1
+        elif a.action == "status":
+            for st in api.dm_status().get("statuses", []) or []:
+                age = time.time() - (int(st.get("updatedAtNs") or 0) / 1e9)
+                stale = st.get("updatedAtNs") and age > a.stale_seconds
+                print(f"  {st.get('policy'):28} phase={st.get('phase'):12} lag={st.get('lagSeconds')}s "
+                      f"files={st.get('filesMoved')} bytes={st.get('bytesMoved')} updated={age:.0f}s ago "
+                      f"err={st.get('lastError') or '-'}")
+                if stale:
+                    # status is not refreshed while idle, and a dead worker leaves its last 'caught_up' behind
+                    # (lab finding E-08): treat as a hint only - the canary write is the real check
+                    log(f"{st.get('policy')}: status not refreshed for {age:.0f}s - confirm with a canary write; "
+                        "check data_movement jobs for a dead worker id", "warn")
+    return rc
+
+
+def cmd_shell(inv, a):
+    print(weed_shell(inv, a.cluster, " ".join(a.command)))
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="swctl", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("-i", "--inventory", required=True)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    def sp(name, fn, **kw):
+        p = sub.add_parser(name, **kw)
+        p.set_defaults(fn=fn)
+        return p
+    p = sp("validate", cmd_validate)
+    p.add_argument("--strict", action="store_true", help="exit 1 on any FAIL")
+    p.add_argument("--json")
+    p = sp("render", cmd_render)
+    p.add_argument("--generate-secrets", action="store_true", help="generate missing secrets (lab only)")
+    for name, fn in (("plan", cmd_plan), ("deploy", cmd_deploy), ("bootstrap", cmd_bootstrap),
+                     ("verify", cmd_verify), ("status", cmd_status), ("install", cmd_install)):
+        p = sp(name, fn)
+        p.add_argument("--cluster")
+        p.add_argument("--dry-run", action="store_true")
+        if name == "deploy":
+            p.add_argument("--phase", help=f"comma list of {PHASES}")
+            p.add_argument("--report")
+        if name == "install":
+            p.add_argument("--binary", required=True)
+    for name, fn in (("start", cmd_start), ("stop", cmd_stop)):
+        p = sp(name, fn)
+        p.add_argument("--cluster")
+        p.add_argument("--host")
+        p.add_argument("--kind")
+        p.add_argument("--kill", action="store_true", help="SIGKILL (simulate crash)")
+        p.add_argument("--dry-run", action="store_true")
+    p = sp("dm", cmd_dm, help="Enterprise Data Movement: enable | apply | status")
+    p.add_argument("action", choices=["enable", "apply", "status"])
+    p.add_argument("--stale-seconds", type=int, default=3600, help="warn when a policy status is older than this")
+    p = sp("shell", cmd_shell)
+    p.add_argument("--cluster", required=True)
+    p.add_argument("command", nargs="+")
+    a = ap.parse_args(argv)
+    inv = Inventory(a.inventory)
+    return a.fn(inv, a)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

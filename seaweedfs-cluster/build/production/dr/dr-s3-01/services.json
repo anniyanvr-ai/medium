@@ -1,0 +1,22 @@
+[
+  {
+    "name": "seaweed-s3",
+    "kind": "s3",
+    "phase": "s3",
+    "ip": "10.20.5.11",
+    "http": 8333,
+    "grpc": 18333,
+    "metrics": 9328,
+    "args": [
+      "s3",
+      "-ip.bind=10.20.5.11",
+      "-port=8333",
+      "-filer=10.20.4.11:8888,10.20.4.12:8888,10.20.4.13:8888",
+      "-config=/etc/seaweedfs/s3.json",
+      "-dataCenter=dc2",
+      "-localSocket=/data/seaweed/s3.sock",
+      "-metricsIp=10.20.5.11",
+      "-metricsPort=9328"
+    ]
+  }
+]

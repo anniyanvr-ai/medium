@@ -1,0 +1,20 @@
+[
+  {
+    "name": "seaweed-admin",
+    "kind": "admin",
+    "phase": "admin",
+    "ip": "10.10.6.11",
+    "http": 23646,
+    "grpc": 33646,
+    "metrics": 9329,
+    "args": [
+      "admin",
+      "-ip=10.10.6.11",
+      "-port=23646",
+      "-master=10.10.1.11:9333,10.10.1.12:9333,10.10.1.13:9333",
+      "-dataDir=/data/seaweed/admin",
+      "-metricsIp=10.10.6.11",
+      "-metricsPort=9329"
+    ]
+  }
+]

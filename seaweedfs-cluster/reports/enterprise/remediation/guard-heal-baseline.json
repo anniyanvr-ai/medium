@@ -1,0 +1,68 @@
+{
+ "ts": 1791390623.9842703,
+ "rc": 0,
+ "findings": [
+  {
+   "check": "dm",
+   "level": "FAIL",
+   "msg": "primary->dr:archive canary NOT replicated within 60s (policy phase=caught_up, job=running on w-vm-96ea, orphaned jobs=0, live workers=2)",
+   "since": 1791383093.2269447,
+   "orphaned": [],
+   "unscheduled": false
+  },
+  {
+   "check": "dm",
+   "level": "FIXED",
+   "msg": "primary->dr:archive: replication resumed 313s after the first fix"
+  },
+  {
+   "check": "dm",
+   "level": "FIXED",
+   "msg": "primary->dr:archive: reconcile checked 7549 objects, copied 16, failures 0",
+   "reconcile": {
+    "bucket": "archive",
+    "partitions": 1,
+    "window": [
+     1791383033.0,
+     null
+    ],
+    "mode": "head",
+    "src_objects": 7549,
+    "dst_objects": 7535,
+    "missing_on_dst": 14,
+    "extra_on_dst": 0,
+    "size_mismatch": 2,
+    "copied": 16,
+    "copy_failures": 0,
+    "deleted": 0,
+    "elapsed_s": 17.3,
+    "sample_missing": [
+     "_canary/2026/10/07/1791389486756",
+     "_canary/2026/10/07/1791389532381",
+     "_canary/2026/10/07/1791389578002",
+     "_canary/2026/10/07/1791389623573",
+     "_canary/2026/10/07/1791389669137"
+    ],
+    "sample_extra": [],
+    "sample_failures": []
+   }
+  }
+ ],
+ "actions": [
+  {
+   "check": "dm",
+   "action": "primary->dr:archive: rolling restart of workers",
+   "ts": 1791390293.232962
+  },
+  {
+   "check": "dm",
+   "action": "primary->dr:archive: restart admin, then workers",
+   "ts": 1791390518.5115466
+  },
+  {
+   "check": "dm",
+   "action": "primary->dr:archive: reconcile window since 2026-10-07 14:24:53",
+   "ts": 1791390606.3199508
+  }
+ ]
+}

@@ -1,0 +1,47 @@
+I0929 17:23:09.693618 file_util.go:29 Folder /tmp/pc Permission: -rwxr-xr-x
+I0929 17:23:09.693846 master.go:396 current: 127.98.0.1:9333 peers:
+I0929 17:23:09.694298 master_server.go:157 Volume Size Limit is 30720 MB
+I0929 17:23:09.694322 collector.go:84 Reporting anonymous cluster statistics to https://telemetry.seaweedfs.com/api/collect every 24h0m0s once 10 GiB are stored, use -telemetry=false to opt out
+I0929 17:23:09.694501 master.go:205 Start Seaweed Master 8000GB 4.47 pypi at 127.98.0.1:9333
+I0929 17:23:09.694780 net_timeout.go:171 skip starting on 127.98.0.1:9333: listen tcp 127.0.0.1:9333: bind: address already in use
+I0929 17:23:09.694808 raft_server.go:145 Starting RaftServer with 127.98.0.1:9333
+I0929 17:23:09.694947 raft_server.go:77 Recovered TopologyId: f49a5f0e-328b-4cf0-91b6-0533334042fd
+I0929 17:23:09.696335 raft_server.go:231 current cluster leader: 
+I0929 17:23:09.696346 master_server.go:285 [127.98.0.1:9333.19333]  - is the leader.
+I0929 17:23:09.696488 net_timeout.go:171 skip starting on 127.98.0.1:19333: listen tcp 127.0.0.1:19333: bind: address already in use
+I0929 17:23:09.696548 master.go:275 Start Seaweed Master 8000GB 4.47 pypi grpc server at 127.98.0.1:19333
+I0929 17:23:09.696616 master.go:296 bootstrap check in 1.685621992s (peer index 0 of 1)
+I0929 17:23:09.697751 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:10.699008 masterclient.go:586 .master masterClient reconnection attempt #1
+I0929 17:23:10.700153 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:11.701199 masterclient.go:586 .master masterClient reconnection attempt #2
+I0929 17:23:11.702547 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:12.703785 masterclient.go:586 .master masterClient reconnection attempt #3
+I0929 17:23:12.704554 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:13.705124 masterclient.go:586 .master masterClient reconnection attempt #4
+I0929 17:23:13.705837 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:14.706757 masterclient.go:586 .master masterClient reconnection attempt #5
+I0929 17:23:14.707906 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:15.709218 masterclient.go:586 .master masterClient reconnection attempt #6
+I0929 17:23:15.710146 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:16.711153 masterclient.go:586 .master masterClient reconnection attempt #7
+I0929 17:23:16.712046 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:17.712553 masterclient.go:586 .master masterClient reconnection attempt #8
+I0929 17:23:17.713536 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:18.714069 masterclient.go:586 .master masterClient reconnection attempt #9
+I0929 17:23:18.715011 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:19.715979 masterclient.go:586 .master masterClient reconnection attempt #10
+I0929 17:23:19.716824 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:20.717223 masterclient.go:586 .master masterClient reconnection attempt #11
+I0929 17:23:20.718330 masterclient.go:262 .master masterClient failed to receive from 127.98.0.1:9333: rpc error: code = Unknown desc = raft.Server: Not current leader
+I0929 17:23:21.035341 master_server.go:250 leader change event:  => 127.98.0.1:9333.19333
+I0929 17:23:21.035372 master_server.go:253 [127.98.0.1:9333.19333] 127.98.0.1:9333.19333 becomes leader.
+I0929 17:23:21.718582 masterclient.go:586 .master masterClient reconnection attempt #12
+I0929 17:23:21.719627 master_grpc_server.go:598 + client .master@127.98.0.1:9333.19333
+I0929 17:23:21.719905 masterclient.go:381 updateVidMap ignore short heartbeat: volume_location:{leader:"127.98.0.1:9333.19333"}
+I0929 17:23:21.719944 masterclient.go:315 + master@127.98.0.1:9333 noticed .master 127.98.0.1:9333.19333
+I0929 17:23:21.729429 master_grpc_server.go:598 + client .filer@127.98.0.1:8888.18888
+I0929 17:23:21.729662 masterclient.go:315 + master@127.98.0.1:9333 noticed .filer 127.98.0.1:8888.18888
+I0929 17:23:22.576587 master_grpc_server.go:613 - client .filer@127.98.0.1:8888.18888
+I0929 17:23:22.576627 master_grpc_server.go:516 => client .master@127.98.0.1:9333.19333: rpc error: code = Unavailable desc = transport is closing
+I0929 17:23:22.576639 master_grpc_server.go:613 - client .master@127.98.0.1:9333.19333

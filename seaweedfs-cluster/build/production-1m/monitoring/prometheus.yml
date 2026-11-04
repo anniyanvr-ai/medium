@@ -1,0 +1,338 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+rule_files:
+- seaweedfs-alerts.yml
+scrape_configs:
+- job_name: seaweedfs-admin
+  static_configs:
+  - targets:
+    - 10.10.6.11:9329
+    labels:
+      cluster: primary
+      host: primary-admin
+      rack: r1
+  - targets:
+    - 10.20.6.11:9329
+    labels:
+      cluster: dr
+      host: dr-admin
+      rack: r1
+- job_name: seaweedfs-canary
+  static_configs:
+  - targets:
+    - 10.10.6.11:9340
+    labels:
+      cluster: primary
+- job_name: seaweedfs-filer
+  static_configs:
+  - targets:
+    - 10.10.4.11:9327
+    labels:
+      cluster: primary
+      host: primary-filer-01
+      rack: r1
+  - targets:
+    - 10.10.4.12:9327
+    labels:
+      cluster: primary
+      host: primary-filer-02
+      rack: r2
+  - targets:
+    - 10.10.4.13:9327
+    labels:
+      cluster: primary
+      host: primary-filer-03
+      rack: r3
+  - targets:
+    - 10.20.4.11:9327
+    labels:
+      cluster: dr
+      host: dr-filer-01
+      rack: r1
+  - targets:
+    - 10.20.4.12:9327
+    labels:
+      cluster: dr
+      host: dr-filer-02
+      rack: r2
+  - targets:
+    - 10.20.4.13:9327
+    labels:
+      cluster: dr
+      host: dr-filer-03
+      rack: r3
+- job_name: seaweedfs-master
+  static_configs:
+  - targets:
+    - 10.10.1.11:9324
+    labels:
+      cluster: primary
+      host: primary-master-01
+      rack: r1
+  - targets:
+    - 10.10.1.12:9324
+    labels:
+      cluster: primary
+      host: primary-master-02
+      rack: r2
+  - targets:
+    - 10.10.1.13:9324
+    labels:
+      cluster: primary
+      host: primary-master-03
+      rack: r3
+  - targets:
+    - 10.20.1.11:9324
+    labels:
+      cluster: dr
+      host: dr-master-01
+      rack: r1
+  - targets:
+    - 10.20.1.12:9324
+    labels:
+      cluster: dr
+      host: dr-master-02
+      rack: r2
+  - targets:
+    - 10.20.1.13:9324
+    labels:
+      cluster: dr
+      host: dr-master-03
+      rack: r3
+- job_name: seaweedfs-s3
+  static_configs:
+  - targets:
+    - 10.10.5.11:9328
+    labels:
+      cluster: primary
+      host: primary-s3-01
+      rack: r1
+  - targets:
+    - 10.10.5.12:9328
+    labels:
+      cluster: primary
+      host: primary-s3-02
+      rack: r2
+  - targets:
+    - 10.10.5.13:9328
+    labels:
+      cluster: primary
+      host: primary-s3-03
+      rack: r3
+  - targets:
+    - 10.20.5.11:9328
+    labels:
+      cluster: dr
+      host: dr-s3-01
+      rack: r1
+  - targets:
+    - 10.20.5.12:9328
+    labels:
+      cluster: dr
+      host: dr-s3-02
+      rack: r2
+  - targets:
+    - 10.20.5.13:9328
+    labels:
+      cluster: dr
+      host: dr-s3-03
+      rack: r3
+- job_name: seaweedfs-volume_cold
+  static_configs:
+  - targets:
+    - 10.10.20.11:9326
+    labels:
+      cluster: primary
+      host: primary-cold-01
+      rack: r1
+  - targets:
+    - 10.10.20.12:9326
+    labels:
+      cluster: primary
+      host: primary-cold-02
+      rack: r1
+  - targets:
+    - 10.10.20.13:9326
+    labels:
+      cluster: primary
+      host: primary-cold-03
+      rack: r2
+  - targets:
+    - 10.10.20.14:9326
+    labels:
+      cluster: primary
+      host: primary-cold-04
+      rack: r2
+  - targets:
+    - 10.10.20.15:9326
+    labels:
+      cluster: primary
+      host: primary-cold-05
+      rack: r3
+  - targets:
+    - 10.10.20.16:9326
+    labels:
+      cluster: primary
+      host: primary-cold-06
+      rack: r3
+  - targets:
+    - 10.20.20.11:9326
+    labels:
+      cluster: dr
+      host: dr-cold-01
+      rack: r1
+  - targets:
+    - 10.20.20.12:9326
+    labels:
+      cluster: dr
+      host: dr-cold-02
+      rack: r1
+  - targets:
+    - 10.20.20.13:9326
+    labels:
+      cluster: dr
+      host: dr-cold-03
+      rack: r2
+  - targets:
+    - 10.20.20.14:9326
+    labels:
+      cluster: dr
+      host: dr-cold-04
+      rack: r2
+  - targets:
+    - 10.20.20.15:9326
+    labels:
+      cluster: dr
+      host: dr-cold-05
+      rack: r3
+  - targets:
+    - 10.20.20.16:9326
+    labels:
+      cluster: dr
+      host: dr-cold-06
+      rack: r3
+- job_name: seaweedfs-volume_hot
+  static_configs:
+  - targets:
+    - 10.10.10.11:9325
+    labels:
+      cluster: primary
+      host: primary-hot-01
+      rack: r1
+  - targets:
+    - 10.10.10.12:9325
+    labels:
+      cluster: primary
+      host: primary-hot-02
+      rack: r1
+  - targets:
+    - 10.10.10.13:9325
+    labels:
+      cluster: primary
+      host: primary-hot-03
+      rack: r2
+  - targets:
+    - 10.10.10.14:9325
+    labels:
+      cluster: primary
+      host: primary-hot-04
+      rack: r2
+  - targets:
+    - 10.10.10.15:9325
+    labels:
+      cluster: primary
+      host: primary-hot-05
+      rack: r3
+  - targets:
+    - 10.10.10.16:9325
+    labels:
+      cluster: primary
+      host: primary-hot-06
+      rack: r3
+  - targets:
+    - 10.20.10.11:9325
+    labels:
+      cluster: dr
+      host: dr-hot-01
+      rack: r1
+  - targets:
+    - 10.20.10.12:9325
+    labels:
+      cluster: dr
+      host: dr-hot-02
+      rack: r1
+  - targets:
+    - 10.20.10.13:9325
+    labels:
+      cluster: dr
+      host: dr-hot-03
+      rack: r2
+  - targets:
+    - 10.20.10.14:9325
+    labels:
+      cluster: dr
+      host: dr-hot-04
+      rack: r2
+  - targets:
+    - 10.20.10.15:9325
+    labels:
+      cluster: dr
+      host: dr-hot-05
+      rack: r3
+  - targets:
+    - 10.20.10.16:9325
+    labels:
+      cluster: dr
+      host: dr-hot-06
+      rack: r3
+- job_name: seaweedfs-worker
+  static_configs:
+  - targets:
+    - 10.10.6.21:9330
+    labels:
+      cluster: primary
+      host: primary-worker-01
+      rack: r2
+  - targets:
+    - 10.10.6.21:9331
+    labels:
+      cluster: primary
+      host: primary-worker-01
+      rack: r2
+  - targets:
+    - 10.10.6.22:9330
+    labels:
+      cluster: primary
+      host: primary-worker-02
+      rack: r3
+  - targets:
+    - 10.10.6.22:9331
+    labels:
+      cluster: primary
+      host: primary-worker-02
+      rack: r3
+  - targets:
+    - 10.20.6.21:9330
+    labels:
+      cluster: dr
+      host: dr-worker-01
+      rack: r2
+  - targets:
+    - 10.20.6.21:9331
+    labels:
+      cluster: dr
+      host: dr-worker-01
+      rack: r2
+  - targets:
+    - 10.20.6.22:9330
+    labels:
+      cluster: dr
+      host: dr-worker-02
+      rack: r3
+  - targets:
+    - 10.20.6.22:9331
+    labels:
+      cluster: dr
+      host: dr-worker-02
+      rack: r3

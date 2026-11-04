@@ -1,0 +1,44 @@
+{
+  "identities": [
+    {
+      "name": "archive-app",
+      "credentials": [
+        {
+          "accessKey": "archive_app",
+          "secretKey": "__FROM_VAULT__"
+        }
+      ],
+      "actions": [
+        "Read:archive",
+        "Write:archive",
+        "List:archive",
+        "Tagging:archive"
+      ]
+    },
+    {
+      "name": "monitor",
+      "credentials": [
+        {
+          "accessKey": "monitor_probe",
+          "secretKey": "__FROM_VAULT__"
+        }
+      ],
+      "actions": [
+        "Read:archive",
+        "List:archive"
+      ]
+    },
+    {
+      "name": "admin",
+      "credentials": [
+        {
+          "accessKey": "sw_admin",
+          "secretKey": "__FROM_VAULT__"
+        }
+      ],
+      "actions": [
+        "Admin"
+      ]
+    }
+  ]
+}

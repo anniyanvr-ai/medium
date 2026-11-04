@@ -1,0 +1,227 @@
+{
+  "inventory": "/home/claude/seaweedfs-deploy/inventory/lab-ent.yaml",
+  "weed_version": "version 8000GB 4.48-enterprise 5d7398cf linux amd64",
+  "minutes": 13.1,
+  "summary": {
+    "PASS": 8,
+    "FAIL": 4,
+    "FINDING": 1,
+    "SKIP": 0
+  },
+  "results": [
+    {
+      "id": "X05",
+      "category": "tiering",
+      "title": "Remediation: Enterprise custom EC 6+3 survives a cold node loss on 3 racks",
+      "expected": "max 3 shards per node <= 3 parity: 0 unreadable with one cold node down",
+      "status": "FAIL",
+      "evidence": "exception: An error occurred (InternalError) when calling the PutObject operation (reached max retries: 4): We encountered an internal error, please try again.\nTraceback (most recent call last):\n  File \"/home/claude/seaweedfs-deploy/tests/e2e_test.py\", line 88, in run\n    status, evidence = fn()\n                       ^^^^\n  File \"/home/claude/seaweedfs-deploy/tests/e2e_enterprise.py\", line 324, in _\n    c.put_object(Bucket=\"archive63\", Key=f\"t/{i:04d}\", Body=body)\n  File \"/usr/local/lib/python3.11/dist-packages/botocore/client.py\", line 606, in _api_call\n    return self._make_api_call(operation_name, kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nbotocore.exceptions.ClientError: An error occurred (InternalError) when calling the PutObject operation (reached max retries: 4): We encountered an internal error, please try again.\n",
+      "seconds": 28.9
+    },
+    {
+      "id": "X10",
+      "category": "data-movement",
+      "title": "Initial snapshot completeness on a pre-loaded primary (written via all 3 gateways)",
+      "expected": "policy reaches caught_up and listing+ETag diff Primary vs DR is 0 - no reconcile needed",
+      "status": "PASS",
+      "evidence": {
+        "phases": [
+          "unspecified",
+          "snapshot",
+          "tailing",
+          "caught_up"
+        ],
+        "seconds_to_caught_up": 39.1,
+        "filesMoved": 3803,
+        "bytesMoved_mb": 410.9,
+        "snapshotEntriesWalked": 3042,
+        "src_objects": 3030,
+        "missing_on_dr": 0,
+        "size_mismatch": 0
+      },
+      "seconds": 149.2
+    },
+    {
+      "id": "X11",
+      "category": "data-movement",
+      "title": "CONTINUOUS lag (PUT via all 3 gateways -> visible on DR)",
+      "expected": "lag well under RPO",
+      "status": "PASS",
+      "evidence": {
+        "p50_s": 0.21,
+        "p95_s": 0.32,
+        "max_s": 0.42,
+        "reported_lagSeconds": 0,
+        "phase": "caught_up"
+      },
+      "seconds": 7.5
+    },
+    {
+      "id": "X12",
+      "category": "data-movement",
+      "title": "Delete propagation (mirror)",
+      "expected": "delete on Primary removes the object on DR",
+      "status": "PASS",
+      "evidence": {
+        "propagation_s": 0.26
+      },
+      "seconds": 0.3
+    },
+    {
+      "id": "X13",
+      "category": "data-movement",
+      "title": "Primary filer-01 crash while writing (the v1/OSS gap scenario)",
+      "expected": "every acknowledged write reaches DR after recovery - no reconcile needed",
+      "status": "PASS",
+      "evidence": {
+        "acked": 258,
+        "missing_on_dr": 0,
+        "catch_up_s": 1.0,
+        "load": {
+          "max_stall_s": 15.3,
+          "ops": 516,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 9,
+          "put_max_ms": 15304
+        }
+      },
+      "seconds": 33.5
+    },
+    {
+      "id": "X14",
+      "category": "data-movement",
+      "title": "DR target filer crash (the filer the target points at)",
+      "expected": "replication pauses, resumes, no gaps",
+      "status": "PASS",
+      "evidence": {
+        "acked": 498,
+        "missing_on_dr": 0,
+        "catch_up_s": 1.6,
+        "load": {
+          "max_stall_s": 0.1,
+          "ops": 996,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 9,
+          "put_max_ms": 37
+        }
+      },
+      "seconds": 34.0
+    },
+    {
+      "id": "X15",
+      "category": "data-movement",
+      "title": "All Data Movement workers crash for 20 s",
+      "expected": "leases expire, a restarted worker resumes from the checkpoint, no gaps",
+      "status": "FAIL",
+      "evidence": {
+        "acked": 489,
+        "missing_on_dr": 445,
+        "catch_up_s": 246.1,
+        "load": {
+          "max_stall_s": 0.1,
+          "ops": 978,
+          "failed": 0,
+          "error_window_s": 0.0,
+          "errors": [],
+          "put_p50_ms": 8,
+          "put_max_ms": 51
+        }
+      },
+      "seconds": 277.6
+    },
+    {
+      "id": "X16",
+      "category": "data-movement",
+      "title": "BACKUP mode keeps objects deleted on Primary",
+      "expected": "backup copy retains a deleted object (deletes OFF)",
+      "status": "PASS",
+      "evidence": {
+        "copied_s": 153.1,
+        "present_after_primary_delete": true,
+        "phase": "unspecified"
+      },
+      "seconds": 176.8
+    },
+    {
+      "id": "X17",
+      "category": "data-movement",
+      "title": "Where does replicated data land on DR?",
+      "expected": "(design note) DR landing tier",
+      "status": "FINDING",
+      "evidence": {
+        "dr_ssd_volumes": 14,
+        "dr_hdd_volumes": 6,
+        "note": "seed lands on DR SSD as new data; size DR SSD or use a short-quiet DR profile during seeding"
+      },
+      "seconds": 0.0
+    },
+    {
+      "id": "X20",
+      "category": "failover",
+      "title": "Unplanned Primary DC loss under load: RPO with Data Movement",
+      "expected": "acknowledged writes missing on DR <= RPO window",
+      "status": "PASS",
+      "evidence": {
+        "acked_puts": 439,
+        "missing_on_dr": 439,
+        "rpo_observed_s": 14.98
+      },
+      "seconds": 29.3
+    },
+    {
+      "id": "X21",
+      "category": "failover",
+      "title": "Activate DR: LIST/GET/PUT with application credentials",
+      "expected": "all succeed",
+      "status": "PASS",
+      "evidence": {
+        "list": 10,
+        "dr_writes": 50,
+        "rto_s": 21.3
+      },
+      "seconds": 7.0
+    },
+    {
+      "id": "X22",
+      "category": "failover",
+      "title": "Failback with a MIGRATE policy DR -> Primary (drain fence)",
+      "expected": "DR-era writes on Primary; policy reports a cut-over-ready phase; forward replication re-established",
+      "status": "FAIL",
+      "evidence": "exception: <urlopen error [Errno 111] Connection refused>\nTraceback (most recent call last):\n  File \"/usr/lib/python3.11/urllib/request.py\", line 1348, in do_open\n    h.request(req.get_method(), req.selector, req.data, headers,\n  File \"/usr/lib/python3.11/http/client.py\", line 1323, in request\n    self._send_request(method, url, body, headers, encode_chunked)\n  File \"/usr/lib/python3.11/http/client.py\", line 1369, in _send_request\n    self.endheaders(body, encode_chunked=encode_chunked)\nConnectionRefusedError: [Errno 111] Connection refused\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/home/claude/seaweedfs-deploy/tests/e2e_test.py\", line 88, in run\n    status, evidence = fn()\n                       ^^^^\n  File \"/home/claude/seaweedfs-deploy/tests/e2e_enterprise.py\", line 583, in _\n    \"DR-era writes on Primary; policy reports a cut-over-ready phase; forward replication re-established\")\n     ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/claude/seaweedfs-deploy/bin/seaweed_admin_api.py\", line 113, in put_policy\n    {\"token\": self._token(\"policies\", policy[\"name\"]), \"policy\": policy})\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nurllib.error.URLError: <urlopen error [Errno 111] Connection refused>\n",
+      "seconds": 22.2
+    },
+    {
+      "id": "X23",
+      "category": "failover",
+      "title": "Post-failback consistency Primary vs DR",
+      "expected": "only the RPO-window writes differ",
+      "status": "FAIL",
+      "evidence": {
+        "src_objects": 4494,
+        "dst_objects": 3660,
+        "missing_on_dst": 884,
+        "extra_on_dst": 50,
+        "size_mismatch": 0,
+        "rpo_window_objects": 439
+      },
+      "seconds": 19.4
+    }
+  ],
+  "tiering_before_after": {
+    "before": null,
+    "after": null,
+    "policy_propagation_s": null
+  },
+  "replication": {
+    "seed": {
+      "objects": 3030,
+      "seconds": 39.1,
+      "bytesMoved": 430901712,
+      "filesMoved": 3803
+    }
+  }
+}

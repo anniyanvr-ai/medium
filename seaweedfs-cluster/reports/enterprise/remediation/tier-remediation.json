@@ -1,0 +1,82 @@
+{
+ "bucket": "archive63",
+ "landing_gate": {
+  "ok": true,
+  "s": 0
+ },
+ "ec_volumes_before": [
+  45,
+  46,
+  47,
+  48,
+  49,
+  50,
+  51,
+  52
+ ],
+ "detect_after_s": 32,
+ "before_fix": [
+  {
+   "check": "tier",
+   "level": "FAIL",
+   "msg": "primary: 1 replicated copy(ies) of fully erasure-coded volumes still present ([68]) - finding E-03"
+  },
+  {
+   "check": "layout",
+   "level": "OK",
+   "msg": "primary: master writable layouts consistent"
+  }
+ ],
+ "put_errors_before_fix": 0,
+ "put_error_sample": [],
+ "fix": [
+  {
+   "check": "tier",
+   "level": "WARN",
+   "msg": "primary: 1 replicated copy(ies) of fully erasure-coded volumes still present ([68]) - finding E-03"
+  },
+  {
+   "check": "tier",
+   "level": "FIXED",
+   "msg": "primary: leftover copies removed (1/1)"
+  },
+  {
+   "check": "layout",
+   "level": "OK",
+   "msg": "primary: master writable layouts consistent"
+  }
+ ],
+ "fix_actions": [
+  "primary: volume.delete -node=127.10.10.12:8080 -volumeId=68"
+ ],
+ "after_fix": [
+  {
+   "check": "tier",
+   "level": "OK",
+   "msg": "primary: no leftover replicas of erasure-coded volumes"
+  },
+  {
+   "check": "layout",
+   "level": "OK",
+   "msg": "primary: master writable layouts consistent"
+  }
+ ],
+ "put_errors_after_fix": 0,
+ "puts_ok": 20,
+ "dataset_unreadable_or_corrupt": "0/150",
+ "new_ec_volumes": [
+  68
+ ],
+ "ec_volumes": [
+  45,
+  46,
+  47,
+  48,
+  49,
+  50,
+  51,
+  52,
+  68
+ ],
+ "guard_log": "! [tier] primary: 1 replicated copy(ies) of fully erasure-coded volumes still present ([68]) - finding E-03\n  [tier] FIX: primary: volume.delete -node=127.10.10.12:8080 -volumeId=68\n\u2714 [tier] primary: leftover copies removed (1/1)\n\u2714 [layout] primary: master writable layouts consistent\n"
+}

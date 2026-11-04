@@ -1,0 +1,56 @@
+[
+  {
+    "n": 1,
+    "file": "01-primary-storage_ec-shards.png",
+    "step": "4. EC failure domains",
+    "page": "/storage/ec-shards",
+    "cluster": "primary",
+    "caption": "archive63 bucket demoted to EC 6+3 (max 3 shards per cold node)",
+    "time": "15:18:26"
+  },
+  {
+    "n": 2,
+    "file": "02-primary-data-movement.png",
+    "step": "8. Backup policy",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "BACKUP policy (deletes OFF) next to the CONTINUOUS mirror",
+    "time": "15:24:04"
+  },
+  {
+    "n": 3,
+    "file": "03-dr-dashboard.png",
+    "step": "9. DC failover",
+    "page": "/",
+    "cluster": "dr",
+    "caption": "DR Admin dashboard while Primary is down: DR serving LIST/GET/PUT",
+    "time": "15:24:37"
+  },
+  {
+    "n": 4,
+    "file": "04-dr-object-store_buckets.png",
+    "step": "9. DC failover",
+    "page": "/object-store/buckets",
+    "cluster": "dr",
+    "caption": "DR buckets: archive holds the replicated data plus DR-era writes",
+    "time": "15:24:41"
+  },
+  {
+    "n": 5,
+    "file": "05-dr-data-movement.png",
+    "step": "10. Failback",
+    "page": "/data-movement",
+    "cluster": "dr",
+    "caption": "DR Admin: MIGRATE policy failback-dr-to-primary replaying DR-era writes",
+    "time": "15:35:10"
+  },
+  {
+    "n": 6,
+    "file": "06-primary-data-movement.png",
+    "step": "10. Failback",
+    "page": "/data-movement",
+    "cluster": "primary",
+    "caption": "Primary Admin after failback: forward CONTINUOUS mirror re-enabled",
+    "time": "15:38:30"
+  }
+]

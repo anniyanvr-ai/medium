@@ -1,0 +1,13 @@
+{
+ "tune": false,
+ "guard": true,
+ "rate": 5.0,
+ "down_s": 20,
+ "guard_rc": 0,
+ "guard_log": "\u2718 [dm] primary->dr:archive canary NOT replicated within 60s (policy phase=caught_up, job=running on w-vm-96ea, orphaned jobs=0, live workers=2)\n  [dm] FIX: primary->dr:archive: expire the policy's job and trigger detection\n  [dm] FIX: primary->dr:archive: expired job data_movement-scheduled-1791394906121882414-1 on w-vm-96ea -> HTTP 200\n\u2714 [dm] primary->dr:archive: replication resumed 82s after the first fix\n  [dm] FIX: primary->dr:archive: reconcile window since 2026-10-07 17:42:08\n\u2714 [dm] primary->dr:archive: reconcile checked 858 objects, copied 373, failures 0\n\u2714 [tier] primary: no leftover replicas of erasure-coded volumes\n\u2714 [layout] primary: master writable layouts consistent\n",
+ "recovery_s": 152.3,
+ "healed_by": "sw-guard",
+ "acked": 1026,
+ "missing_before": 0,
+ "missing_window": null
+}

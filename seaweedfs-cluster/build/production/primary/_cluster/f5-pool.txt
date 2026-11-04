@@ -1,0 +1,14 @@
+      F5 LTM configuration for s3-primary.company.com (primary)
+      ---------------------------------------------------------------
+      Virtual server : s3-primary.company.com:443  (TLS terminate, SNAT automap)
+      Pool           : seaweedfs-s3-primary   (least-connections, slow-ramp 30s)
+        member 10.10.5.11:8333
+member 10.10.5.12:8333
+member 10.10.5.13:8333
+      Monitor 1 (liveness) : HTTP GET /healthz  -> expect 200 (interval 5s, timeout 16s)
+      Monitor 2 (deep)     : S3 HEAD /archive/.healthcheck/canary signed with the
+                             read-only 'monitor' identity -> expect 200. /healthz alone
+                             does NOT detect a gateway that lost all filers.
+      Pool min-up    : 2 members (else mark VIP down -> GSLB fails over)
+      Timeouts       : idle 300s (large multipart uploads), request body >= 5 GiB allowed
+      X-Forwarded-For: insert; add F5 self-IPs to [s3.trusted_proxies] white_list
